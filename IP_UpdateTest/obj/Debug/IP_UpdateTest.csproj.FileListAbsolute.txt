@@ -1,0 +1,50 @@
+h:\系统文件夹\documents\visual studio 2012\Projects\IP_UpdateTest\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe.config
+h:\系统文件夹\documents\visual studio 2012\Projects\IP_UpdateTest\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe
+h:\系统文件夹\documents\visual studio 2012\Projects\IP_UpdateTest\IP_UpdateTest\bin\Debug\IP_UpdateTest.pdb
+h:\系统文件夹\documents\visual studio 2012\Projects\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.Properties.Resources.resources
+h:\系统文件夹\documents\visual studio 2012\Projects\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.csproj.GenerateResource.Cache
+h:\系统文件夹\documents\visual studio 2012\Projects\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.exe
+h:\系统文件夹\documents\visual studio 2012\Projects\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.pdb
+h:\系统文件夹\documents\visual studio 2012\Projects\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmInfo.resources
+h:\系统文件夹\documents\visual studio 2012\Projects\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmMain.resources
+C:\Users\Administrator\Desktop\IP_UpdateTest\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe.config
+C:\Users\Administrator\Desktop\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.exe
+C:\Users\Administrator\Desktop\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.pdb
+C:\Users\Administrator\Desktop\IP_UpdateTest\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe
+C:\Users\Administrator\Desktop\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmInfo.resources
+C:\Users\Administrator\Desktop\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmMain.resources
+C:\Users\Administrator\Desktop\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.Properties.Resources.resources
+C:\Users\Administrator\Desktop\IP_UpdateTest\IP_UpdateTest\obj\Debug\IP_UpdateTest.csproj.GenerateResource.Cache
+C:\Users\Administrator\Desktop\IP_UpdateTest\IP_UpdateTest\bin\Debug\IP_UpdateTest.pdb
+H:\系统文件夹\Desktop\10-27\10-27_IP-C#\IP_Update_Bug\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe.config
+H:\系统文件夹\Desktop\10-27\10-27_IP-C#\IP_Update_Bug\IP_UpdateTest\obj\Debug\IP_UpdateTest.exe
+H:\系统文件夹\Desktop\10-27\10-27_IP-C#\IP_Update_Bug\IP_UpdateTest\obj\Debug\IP_UpdateTest.pdb
+H:\系统文件夹\Desktop\10-27\10-27_IP-C#\IP_Update_Bug\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe
+H:\系统文件夹\Desktop\10-27\10-27_IP-C#\IP_Update_Bug\IP_UpdateTest\bin\Debug\IP_UpdateTest.pdb
+H:\系统文件夹\Desktop\10-27\10-27_IP-C#\IP_Update_Bug\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmInfo.resources
+H:\系统文件夹\Desktop\10-27\10-27_IP-C#\IP_Update_Bug\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmMain.resources
+H:\系统文件夹\Desktop\10-27\10-27_IP-C#\IP_Update_Bug\IP_UpdateTest\obj\Debug\IP_UpdateTest.Properties.Resources.resources
+H:\系统文件夹\Desktop\10-27\10-27_IP-C#\IP_Update_Bug\IP_UpdateTest\obj\Debug\IP_UpdateTest.csproj.GenerateResource.Cache
+H:\ｙ６\C#_IP\IP_Update_Bug_10.31\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe.config
+H:\ｙ６\C#_IP\IP_Update_Bug_10.31\IP_UpdateTest\obj\Debug\IP_UpdateTest.exe
+H:\ｙ６\C#_IP\IP_Update_Bug_10.31\IP_UpdateTest\obj\Debug\IP_UpdateTest.pdb
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe.config
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\obj\Debug\IP_UpdateTest.exe
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\obj\Debug\IP_UpdateTest.pdb
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\bin\Debug\IP_UpdateTest.pdb
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\obj\Debug\IP_UpdateTest.csprojResolveAssemblyReference.cache
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmInfo.resources
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmMain.resources
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\obj\Debug\IP_UpdateTest.Properties.Resources.resources
+C:\Users\Administrator\Desktop\IP_Update_Bug_10.31\IP_UpdateTest\obj\Debug\IP_UpdateTest.csproj.GenerateResource.Cache
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe.config
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\obj\Debug\IP_UpdateTest.exe
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\obj\Debug\IP_UpdateTest.pdb
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\bin\Debug\IP_UpdateTest.exe
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\bin\Debug\IP_UpdateTest.pdb
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\obj\Debug\IP_UpdateTest.csprojResolveAssemblyReference.cache
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmInfo.resources
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\obj\Debug\IP_UpdateTest.FrmMain.resources
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\obj\Debug\IP_UpdateTest.Properties.Resources.resources
+H:\ｙ６\C#_IP\IP_Update_Bug_11.3\IP_UpdateTest\obj\Debug\IP_UpdateTest.csproj.GenerateResource.Cache

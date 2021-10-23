@@ -1,7 +1,7 @@
 # IP Tool
 
-![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/kekemao00/ip-tool)
 ![Lines of code](https://img.shields.io/tokei/lines/github.com/kekemao00/kekemao00.github.io)
+![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/kekemao00/ip-tool)
 ![GitHub last commit](https://img.shields.io/github/last-commit/kekemao00/ip-tool)
 
 

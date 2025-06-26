@@ -1,6 +1,6 @@
 # IP Tool
 
-![Lines of code](https://img.shields.io/tokei/lines/github.com/kekemao00/ip-tool)
+
 ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/kekemao00/ip-tool)
 ![GitHub last commit](https://img.shields.io/github/last-commit/kekemao00/ip-tool)
 
@@ -9,7 +9,7 @@
 ## 简介
 
   - 方便于 IP 查看及修改的工具，可以胜任一般 IP 地址的配置。
-  
+
 ## 功能
 
   - 获取IP地址及快速修改

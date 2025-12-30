@@ -1,0 +1,15 @@
+# 自动检测文本文件并规范化行尾符
+* text=auto
+
+# C# 源文件使用 CRLF (Windows 风格)
+*.cs text eol=crlf
+*.csproj text eol=crlf
+*.sln text eol=crlf
+*.config text eol=crlf
+*.resx text eol=crlf
+*.settings text eol=crlf
+
+# 通用文本文件使用 LF
+*.md text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf

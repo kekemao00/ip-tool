@@ -34,7 +34,7 @@ Windows 网络配置工具，用于查看和修改本机网络适配器的 IP �
 ![配置方案](screenshots/profile.png)
 
 ### 生成报表
-![生成报表](screenshots/generate_report .png)
+![生成报表](screenshots/generate_report.png)
 
 ## 技术栈
 

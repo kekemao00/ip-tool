@@ -36,6 +36,9 @@ namespace IP_UpdateTest
         /// </summary>
         private void ApplyModernTheme()
         {
+            // 调整窗体尺寸以容纳更多功能
+            this.ClientSize = new Size(420, 500);
+
             // 窗体基础样式
             UITheme.ApplyTheme(this);
 
@@ -44,13 +47,13 @@ namespace IP_UpdateTest
             var titleBar = UITheme.CreateTitleBar(this, "网络配置工具");
             this.Controls.Add(titleBar);
 
-            // 添加工具栏面板
-            var toolPanel = new FlowLayoutPanel
+            // 添加工具栏面板 - 第一行
+            var toolPanel1 = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 36,
+                Height = 32,
                 BackColor = UITheme.CardBackground,
-                Padding = new Padding(UITheme.Padding, 4, UITheme.Padding, 4),
+                Padding = new Padding(UITheme.Padding, 4, UITheme.Padding, 0),
                 WrapContents = false
             };
 
@@ -58,11 +61,27 @@ namespace IP_UpdateTest
             var btnDisable = UITheme.CreateToolButton("禁用所有", tsBtnDisableAdapters_Click);
             var btnEnable = UITheme.CreateToolButton("启用所有", tsBtnEnableAdapters_Click);
             var btnReport = UITheme.CreateToolButton("生成报表", tsBtnAllIPReport_Click);
+
+            toolPanel1.Controls.AddRange(new Control[] { btnUsing, btnDisable, btnEnable, btnReport });
+            this.Controls.Add(toolPanel1);
+
+            // 添加工具栏面板 - 第二行（新功能）
+            var toolPanel2 = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 32,
+                BackColor = UITheme.CardBackground,
+                Padding = new Padding(UITheme.Padding, 0, UITheme.Padding, 4),
+                WrapContents = false
+            };
+
             var btnDiagnose = UITheme.CreateToolButton("网络诊断", BtnDiagnose_Click);
             var btnProfile = UITheme.CreateToolButton("配置方案 ▼", BtnProfile_Click);
+            btnProfile.BackColor = UITheme.Primary;
+            btnProfile.ForeColor = Color.White;
 
-            toolPanel.Controls.AddRange(new Control[] { btnUsing, btnDisable, btnEnable, btnReport, btnDiagnose, btnProfile });
-            this.Controls.Add(toolPanel);
+            toolPanel2.Controls.AddRange(new Control[] { btnDiagnose, btnProfile });
+            this.Controls.Add(toolPanel2);
 
             // 样式化所有标签
             foreach (Control ctrl in this.Controls)
@@ -97,7 +116,7 @@ namespace IP_UpdateTest
         /// </summary>
         private void AdjustControlPositions()
         {
-            int offsetY = 50; // 新标题栏 + 工具栏的偏移
+            int offsetY = 80; // 标题栏 40 + 工具栏两行 64 - 原工具栏 25 ≈ 80
             foreach (Control ctrl in this.Controls)
             {
                 if (ctrl is Panel) continue;

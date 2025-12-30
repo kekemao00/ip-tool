@@ -58,8 +58,10 @@ namespace IP_UpdateTest
             var btnDisable = UITheme.CreateToolButton("禁用所有", tsBtnDisableAdapters_Click);
             var btnEnable = UITheme.CreateToolButton("启用所有", tsBtnEnableAdapters_Click);
             var btnReport = UITheme.CreateToolButton("生成报表", tsBtnAllIPReport_Click);
+            var btnDiagnose = UITheme.CreateToolButton("网络诊断", BtnDiagnose_Click);
+            var btnProfile = UITheme.CreateToolButton("配置方案 ▼", BtnProfile_Click);
 
-            toolPanel.Controls.AddRange(new Control[] { btnUsing, btnDisable, btnEnable, btnReport });
+            toolPanel.Controls.AddRange(new Control[] { btnUsing, btnDisable, btnEnable, btnReport, btnDiagnose, btnProfile });
             this.Controls.Add(toolPanel);
 
             // 样式化所有标签
@@ -85,6 +87,9 @@ namespace IP_UpdateTest
 
             // 调整控件位置（标题栏高度变化）
             AdjustControlPositions();
+
+            // 创建 DNS 右键菜单
+            CreateDnsContextMenu();
         }
 
         /// <summary>
@@ -336,6 +341,192 @@ namespace IP_UpdateTest
         private void toolStripLabel1_Click(object sender, EventArgs e)
         {
             Application.Exit();
+        }
+
+        #endregion
+
+        #region 新功能 - 网络诊断、配置方案、DNS 切换
+
+        /// <summary>
+        /// 创建 DNS 右键菜单
+        /// </summary>
+        private void CreateDnsContextMenu()
+        {
+            var menu = new ContextMenuStrip();
+            foreach (var dns in ProfileManager.PresetDns)
+            {
+                var item = new ToolStripMenuItem(dns.Key);
+                item.Click += (s, e) =>
+                {
+                    txtDnsMain.Text = dns.Value[0];
+                    txtDnsBackup.Text = dns.Value[1];
+                };
+                menu.Items.Add(item);
+            }
+            txtDnsMain.ContextMenuStrip = menu;
+            txtDnsBackup.ContextMenuStrip = menu;
+        }
+
+        /// <summary>
+        /// 网络诊断
+        /// </summary>
+        private async void BtnDiagnose_Click(object sender, EventArgs e)
+        {
+            var btn = sender as Button;
+            btn.Enabled = false;
+            btn.Text = "诊断中...";
+
+            try
+            {
+                string gateway = txtGetway.Text.Trim();
+                string result = await NetworkTester.DiagnoseAsync(gateway);
+                MessageBox.Show(result, "网络诊断", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            finally
+            {
+                btn.Text = "网络诊断";
+                btn.Enabled = true;
+            }
+        }
+
+        /// <summary>
+        /// 配置方案菜单
+        /// </summary>
+        private void BtnProfile_Click(object sender, EventArgs e)
+        {
+            var btn = sender as Button;
+            var menu = new ContextMenuStrip();
+
+            // 保存当前配置
+            menu.Items.Add("保存当前配置", null, (s, ev) => SaveCurrentProfile());
+            menu.Items.Add(new ToolStripSeparator());
+
+            // 已保存的配置方案
+            var profiles = ProfileManager.Profiles;
+            if (profiles.Count > 0)
+            {
+                foreach (var p in profiles)
+                {
+                    var item = new ToolStripMenuItem(p.Name + (p.IsDhcp ? " (DHCP)" : ""));
+                    item.Click += (s, ev) => ApplyProfile(p);
+
+                    // 右键删除
+                    var deleteItem = new ToolStripMenuItem("删除");
+                    deleteItem.Click += (s2, ev2) =>
+                    {
+                        if (MessageBox.Show($"确定删除配置方案 \"{p.Name}\"？", "确认", MessageBoxButtons.YesNo) == DialogResult.Yes)
+                        {
+                            ProfileManager.Remove(p.Name);
+                            MessageBox.Show("已删除");
+                        }
+                    };
+                    item.DropDownItems.Add(deleteItem);
+
+                    menu.Items.Add(item);
+                }
+                menu.Items.Add(new ToolStripSeparator());
+            }
+
+            // 导入导出
+            menu.Items.Add("导出配置", null, (s, ev) => ExportProfiles());
+            menu.Items.Add("导入配置", null, (s, ev) => ImportProfiles());
+
+            menu.Show(btn, new Point(0, btn.Height));
+        }
+
+        /// <summary>
+        /// 保存当前配置为方案
+        /// </summary>
+        private void SaveCurrentProfile()
+        {
+            string name = Microsoft.VisualBasic.Interaction.InputBox("请输入配置方案名称：", "保存配置", "");
+            if (string.IsNullOrWhiteSpace(name)) return;
+
+            var profile = new IpProfile
+            {
+                Name = name,
+                IpAddress = txtIpAddress.Text.Trim(),
+                SubnetMask = txtMask.Text.Trim(),
+                Gateway = txtGetway.Text.Trim(),
+                DnsMain = txtDnsMain.Text.Trim(),
+                DnsBackup = txtDnsBackup.Text.Trim(),
+                IsDhcp = cbxGetIPMethod.SelectedIndex == 0
+            };
+
+            ProfileManager.Add(profile);
+            MessageBox.Show($"配置方案 \"{name}\" 已保存", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// 应用配置方案
+        /// </summary>
+        private void ApplyProfile(IpProfile profile)
+        {
+            if (profile.IsDhcp)
+            {
+                btnSetAutoIPAddress_Click(null, null);
+            }
+            else
+            {
+                txtIpAddress.Text = profile.IpAddress;
+                txtMask.Text = profile.SubnetMask;
+                txtGetway.Text = profile.Gateway;
+                txtDnsMain.Text = profile.DnsMain;
+                txtDnsBackup.Text = profile.DnsBackup;
+                cbxGetIPMethod.SelectedIndex = 1;
+
+                if (MessageBox.Show("是否立即应用此配置？", "确认", MessageBoxButtons.YesNo) == DialogResult.Yes)
+                {
+                    btnGetIPAddress_Click(null, null);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 导出配置
+        /// </summary>
+        private void ExportProfiles()
+        {
+            using (var dialog = new SaveFileDialog())
+            {
+                dialog.Filter = "JSON 文件|*.json";
+                dialog.FileName = "ip_profiles.json";
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        ProfileManager.Export(dialog.FileName);
+                        MessageBox.Show("导出成功", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("导出失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 导入配置
+        /// </summary>
+        private void ImportProfiles()
+        {
+            using (var dialog = new OpenFileDialog())
+            {
+                dialog.Filter = "JSON 文件|*.json";
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        int count = ProfileManager.Import(dialog.FileName);
+                        MessageBox.Show($"成功导入 {count} 个配置方案", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("导入失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
         }
 
         #endregion

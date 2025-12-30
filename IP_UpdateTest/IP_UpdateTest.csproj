@@ -88,6 +88,7 @@
     <Compile Include="NetworkAdapter .cs" />
     <Compile Include="NetworkAdapterUtil.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="UITheme.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="FrmInfo.resx">
       <DependentUpon>FrmInfo.cs</DependentUpon>

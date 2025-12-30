@@ -23,13 +23,82 @@ namespace IP_UpdateTest
         #region load事件
         private void FrmMain_Load_1(object sender, EventArgs e)
         {
+            // 应用现代化主题
+            ApplyModernTheme();
 
-            tagTemp temp = tagTemp.on;
-            this.tsBtnUsingNetwork.BackColor = Color.SpringGreen;
             cbxNetworkAdapter.DisplayMember = "Description";
             state = AdapaterState.EthernetWirelessUseing;
             BindAdapters();
+        }
 
+        /// <summary>
+        /// 应用现代化 UI 主题
+        /// </summary>
+        private void ApplyModernTheme()
+        {
+            // 窗体基础样式
+            UITheme.ApplyTheme(this);
+
+            // 移除旧工具栏，添加自定义标题栏
+            this.Controls.Remove(toolStrip1);
+            var titleBar = UITheme.CreateTitleBar(this, "网络配置工具");
+            this.Controls.Add(titleBar);
+
+            // 添加工具栏面板
+            var toolPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 36,
+                BackColor = UITheme.CardBackground,
+                Padding = new Padding(UITheme.Padding, 4, UITheme.Padding, 4),
+                WrapContents = false
+            };
+
+            var btnUsing = UITheme.CreateToolButton("正在使用", tsBtnUsingNetwork_Click);
+            var btnDisable = UITheme.CreateToolButton("禁用所有", tsBtnDisableAdapters_Click);
+            var btnEnable = UITheme.CreateToolButton("启用所有", tsBtnEnableAdapters_Click);
+            var btnReport = UITheme.CreateToolButton("生成报表", tsBtnAllIPReport_Click);
+
+            toolPanel.Controls.AddRange(new Control[] { btnUsing, btnDisable, btnEnable, btnReport });
+            this.Controls.Add(toolPanel);
+
+            // 样式化所有标签
+            foreach (Control ctrl in this.Controls)
+            {
+                if (ctrl is Label lbl && !(ctrl is LinkLabel))
+                    UITheme.StyleLabel(lbl);
+            }
+
+            // 样式化输入控件
+            UITheme.StyleComboBox(cbxNetworkAdapter);
+            UITheme.StyleComboBox(cbxGetIPMethod);
+            UITheme.StyleTextBox(txtIpAddress);
+            UITheme.StyleTextBox(txtGetway);
+            UITheme.StyleTextBox(txtDnsMain);
+            UITheme.StyleTextBox(txtDnsBackup);
+            UITheme.StyleTextBox(txtDhcpServer);
+            UITheme.StyleTextBox(txtPhycilAddress);
+
+            // 样式化按钮
+            UITheme.StylePrimaryButton(btnGetIPAddress);
+            UITheme.StyleSuccessButton(btnSetAutoIPAddress);
+
+            // 调整控件位置（标题栏高度变化）
+            AdjustControlPositions();
+        }
+
+        /// <summary>
+        /// 调整控件位置以适应新标题栏
+        /// </summary>
+        private void AdjustControlPositions()
+        {
+            int offsetY = 50; // 新标题栏 + 工具栏的偏移
+            foreach (Control ctrl in this.Controls)
+            {
+                if (ctrl is Panel) continue;
+                if (ctrl is FlowLayoutPanel) continue;
+                ctrl.Top += offsetY;
+            }
         }
         #endregion
 
@@ -231,14 +300,8 @@ namespace IP_UpdateTest
 
         private void tsBtnUsingNetwork_Click(object sender, EventArgs e)
         {
-
-            tsBtnUsingNetwork.BackColor = Color.SkyBlue;
-            //tsBtnDisplayAllNetwork.BackColor = SystemColors.Control;
-
-
             state = AdapaterState.EthernetWirelessUseing;
-
-            BindAdapters();  //重新获取适配器信息并绑定
+            BindAdapters();
         }
         /// <summary>
         /// 启用所有链接

@@ -47,12 +47,44 @@ namespace IP_UpdateTest
         /// <summary>
         /// load事件
         /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
         private void FrmInfo_Load(object sender, EventArgs e)
         {
+            ApplyModernTheme();
             cbxReoprt.SelectedIndex = 0;
+        }
 
+        /// <summary>
+        /// 应用现代化 UI 主题
+        /// </summary>
+        private void ApplyModernTheme()
+        {
+            // 窗体基础样式
+            UITheme.ApplyTheme(this);
+            this.Opacity = 1.0;
+
+            // 移除旧关闭按钮
+            this.Controls.Remove(label2);
+
+            // 添加自定义标题栏
+            var titleBar = UITheme.CreateTitleBar(this, "网卡信息报表");
+            this.Controls.Add(titleBar);
+
+            // 样式化控件
+            UITheme.StyleComboBox(cbxReoprt);
+            UITheme.StyleLabel(label1);
+
+            // 样式化报表文本框
+            txtReport.BackColor = UITheme.CardBackground;
+            txtReport.ForeColor = UITheme.TextPrimary;
+            txtReport.Font = new Font("Consolas", 9F);
+            txtReport.BorderStyle = BorderStyle.FixedSingle;
+
+            // 调整控件位置
+            int offsetY = 15;
+            label1.Top += offsetY;
+            cbxReoprt.Top += offsetY;
+            txtReport.Top += offsetY;
+            linkLabel1.Top += offsetY;
         }
 
 
@@ -82,42 +114,30 @@ namespace IP_UpdateTest
 
 
         #region 窗口移动事件
-        /// <summary>
-        /// 窗口移动事件
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-
         private Point offset;
 
         private void FrmInfo_MouseDown(object sender, MouseEventArgs e)
         {
-            if (MouseButtons.Left != e.Button) return;
-
-            Point cur = this.PointToScreen(e.Location);
-            offset = new Point(cur.X - this.Left, cur.Y - this.Top);
-
+            // 由标题栏处理拖动
         }
 
-        /// <summary>
-        /// 鼠标移动事件
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
         private void FrmInfo_MouseMove(object sender, MouseEventArgs e)
         {
-
-            if (MouseButtons.Left != e.Button) return;
-
-            Point cur = MousePosition;
-            this.Location = new Point(cur.X - offset.X, cur.Y - offset.Y);
+            // 由标题栏处理拖动
         }
         #endregion
 
-        //超链接   www.kekemao.top
         private void linkLabel1_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
-            System.Diagnostics.Process.Start("iexplore.exe", "http://kekemao.top");
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "http://kekemao.top",
+                    UseShellExecute = true
+                });
+            }
+            catch { }
         }
 
 

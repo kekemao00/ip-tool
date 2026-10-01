@@ -56,7 +56,7 @@ namespace IP_UpdateTest
             btnExport = AddButton("导出…", false, (s, e) => Export());
             btnCopy = AddButton("复制", true, (s, e) => CopyReport());
 
-            var link = new LinkLabel { Text = "kekemao.top", AutoSize = true, Margin = new Padding(0, 8, 160, 0) };
+            var link = new LinkLabel { Text = "github.com/kekemao00/ip-tool", AutoSize = true, Margin = new Padding(0, 8, 160, 0) };
             link.LinkClicked += (s, e) => OpenHomePage();
             ButtonPanel.Controls.Add(link);
             FinishLayout();
@@ -144,7 +144,7 @@ namespace IP_UpdateTest
         {
             try
             {
-                Process.Start(new ProcessStartInfo { FileName = "http://kekemao.top", UseShellExecute = true });
+                Process.Start(new ProcessStartInfo { FileName = "https://github.com/kekemao00/ip-tool", UseShellExecute = true });
             }
             catch (System.ComponentModel.Win32Exception)
             {

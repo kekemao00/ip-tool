@@ -1,0 +1,46 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write # 推送 v* 标签时创建 Release
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: 构建并运行测试
+        run: dotnet test IP_UpdateTest.sln -c Release
+
+      - name: 打包
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { $env:GITHUB_SHA.Substring(0, 7) }
+          $out = 'IP_UpdateTest/bin/Release/net48'
+          New-Item -ItemType Directory -Force dist | Out-Null
+          # exe.config 中有高 DPI 设置，需与 exe 放在一起
+          Compress-Archive -Path "$out/IP_UpdateTest.exe", "$out/IP_UpdateTest.exe.config" -DestinationPath "dist/IPTool-$version.zip"
+          Get-ChildItem dist/*.zip | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
+            Set-Content dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: IPTool
+          path: dist/
+
+      - name: 发布 Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME dist/* --title $env:GITHUB_REF_NAME --generate-notes

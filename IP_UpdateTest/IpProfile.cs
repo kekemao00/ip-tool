@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.Serialization;
-using System.Runtime.Serialization.Json;
 using System.Text;
+using IP_UpdateTest.Core;
 
 namespace IP_UpdateTest
 {
@@ -22,37 +23,106 @@ namespace IP_UpdateTest
         [DataMember] public bool IsDhcp { get; set; }
         [DataMember] public DateTime CreateTime { get; set; }
 
+        /// <summary>
+        /// DHCP 方案是否手动指定 DNS。旧版本保存的方案没有此项（null），
+        /// 当时 DHCP 方案会把 DNS 恢复为自动获取，读取时保持这一行为。
+        /// </summary>
+        [DataMember] public bool? ManualDns { get; set; }
+
+        /// <summary>
+        /// 绑定的网卡 MAC 地址（如 74-56-3C-12-AB-CD），为空表示应用到当前选中的网卡
+        /// </summary>
+        [DataMember] public string AdapterMac { get; set; }
+
         public IpProfile()
         {
             CreateTime = DateTime.Now;
+        }
+
+        public IpProfile Clone()
+        {
+            var copy = (IpProfile)MemberwiseClone();
+            copy.CreateTime = DateTime.Now;
+            return copy;
+        }
+
+        /// <summary>
+        /// 列表中显示的配置摘要，如“静态 192.168.1.10 / 网关 192.168.1.1”
+        /// </summary>
+        public string Summary
+        {
+            get
+            {
+                string ip = IsDhcp ? "DHCP" : $"静态 {IpAddress}";
+                string dns = string.Join(", ", IpConfigRequest.DnsList(DnsMain, DnsBackup));
+                bool manualDns = IsDhcp ? ManualDns == true && dns.Length > 0 : dns.Length > 0;
+                return ip + (manualDns ? " / DNS " + dns : "");
+            }
+        }
+
+        /// <summary>
+        /// 转成要应用的配置
+        /// </summary>
+        public IpConfigRequest ToRequest()
+        {
+            string[] dns = IpConfigRequest.DnsList(DnsMain, DnsBackup);
+            if (!IsDhcp) return IpConfigRequest.Static(IpAddress, SubnetMask, Gateway, dns);
+
+            bool manualDns = ManualDns == true && dns.Length > 0;
+            return new IpConfigRequest
+            {
+                UseDhcp = true,
+                UseDhcpDns = !manualDns,
+                DnsServers = manualDns ? dns : new string[0]
+            };
         }
 
         public override string ToString() => Name;
     }
 
     /// <summary>
-    /// 配置方案管理器
+    /// 导入配置方案的结果
+    /// </summary>
+    public sealed class ImportResult
+    {
+        public int Added { get; set; }
+        public int Replaced { get; set; }
+        public int Skipped { get; set; }
+    }
+
+    /// <summary>
+    /// 配置方案管理器。读写失败时抛出异常，由界面负责提示。
     /// </summary>
     public static class ProfileManager
     {
-        private static readonly string ProfilePath = Path.Combine(
+        private static string _profilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "IPTool", "profiles.json");
 
         private static List<IpProfile> _profiles;
 
         /// <summary>
-        /// 预设 DNS 列表
+        /// 读取失败（如文件被占用）时禁止保存，避免用空列表覆盖已有数据
+        /// </summary>
+        private static bool _readFailed;
+
+        /// <summary>
+        /// 预设 DNS 列表。腾讯云官方文档只给出 119.29.29.29 一个 IPv4 地址。
         /// </summary>
         public static readonly Dictionary<string, string[]> PresetDns = new Dictionary<string, string[]>
         {
             { "114 DNS", new[] { "114.114.114.114", "114.114.115.115" } },
             { "阿里 DNS", new[] { "223.5.5.5", "223.6.6.6" } },
-            { "腾讯 DNS", new[] { "119.29.29.29", "182.254.116.116" } },
+            { "腾讯 DNS", new[] { "119.29.29.29", "" } },
             { "百度 DNS", new[] { "180.76.76.76", "" } },
             { "Google DNS", new[] { "8.8.8.8", "8.8.4.4" } },
             { "Cloudflare", new[] { "1.1.1.1", "1.0.0.1" } }
         };
+
+        /// <summary>
+        /// 读取时遇到的问题，界面应提示一次；没有问题时为 null
+        /// </summary>
+        public static string LoadWarning { get; private set; }
 
         public static List<IpProfile> Profiles
         {
@@ -64,22 +134,46 @@ namespace IP_UpdateTest
         }
 
         /// <summary>
+        /// 改用指定的存储文件（测试用）
+        /// </summary>
+        public static void UseStorePath(string path)
+        {
+            _profilePath = path;
+            _profiles = null;
+        }
+
+        /// <summary>
         /// 加载配置
         /// </summary>
         public static void Load()
         {
             _profiles = new List<IpProfile>();
+            _readFailed = false;
+            LoadWarning = null;
             try
             {
-                if (File.Exists(ProfilePath))
+                List<IpProfile> loaded = JsonFile.Read<List<IpProfile>>(_profilePath);
+                if (loaded != null) _profiles = loaded.Where(p => p != null && !string.IsNullOrWhiteSpace(p.Name)).ToList();
+            }
+            catch (SerializationException)
+            {
+                // 文件损坏：先改名备份，免得下次保存把它覆盖掉
+                string backup = Path.ChangeExtension(_profilePath, ".corrupt-" + DateTime.Now.ToString("yyyyMMddHHmmss") + ".json");
+                try
                 {
-                    var json = File.ReadAllText(ProfilePath, Encoding.UTF8);
-                    _profiles = Deserialize<List<IpProfile>>(json) ?? new List<IpProfile>();
+                    File.Move(_profilePath, backup);
+                    LoadWarning = $"配置方案文件已损坏，已备份为 {backup}";
+                }
+                catch (IOException)
+                {
+                    _readFailed = true;
+                    LoadWarning = "配置方案文件已损坏，且无法备份";
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
-                System.Diagnostics.Debug.WriteLine($"加载配置失败: {ex.Message}");
+                _readFailed = true;
+                LoadWarning = "读取配置方案失败：" + ex.Message;
             }
         }
 
@@ -88,27 +182,47 @@ namespace IP_UpdateTest
         /// </summary>
         public static void Save()
         {
-            try
-            {
-                var dir = Path.GetDirectoryName(ProfilePath);
-                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-                File.WriteAllText(ProfilePath, Serialize(_profiles), Encoding.UTF8);
-            }
-            catch (Exception ex)
-            {
-                System.Windows.Forms.MessageBox.Show($"保存配置失败: {ex.Message}", "错误",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
-            }
+            if (_readFailed) throw new IOException("配置方案文件读取失败，为避免覆盖已有数据，本次不保存");
+            JsonFile.WriteAtomic(_profilePath, Profiles);
+        }
+
+        public static IpProfile Find(string name)
+        {
+            int index = IndexOf(name);
+            return index >= 0 ? Profiles[index] : null;
         }
 
         /// <summary>
-        /// 添加配置方案
+        /// 方案名称比较时忽略大小写和首尾空格
+        /// </summary>
+        public static bool SameName(string a, string b)
+        {
+            return string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.CurrentCultureIgnoreCase);
+        }
+
+        /// <summary>
+        /// 添加配置方案；已有同名方案时原位替换
         /// </summary>
         public static void Add(IpProfile profile)
         {
-            // 同名覆盖
-            _profiles.RemoveAll(p => p.Name == profile.Name);
-            _profiles.Add(profile);
+            int index = IndexOf(profile.Name);
+            if (index >= 0) Profiles[index] = profile;
+            else Profiles.Add(profile);
+            Save();
+        }
+
+        /// <summary>
+        /// 修改配置方案（可改名）；新名称与其他方案重名时抛出 ArgumentException
+        /// </summary>
+        public static void Update(string originalName, IpProfile profile)
+        {
+            int index = IndexOf(originalName);
+            int duplicate = IndexOf(profile.Name);
+            if (duplicate >= 0 && duplicate != index)
+                throw new ArgumentException($"已存在名为“{profile.Name}”的配置方案");
+
+            if (index >= 0) Profiles[index] = profile;
+            else Profiles.Add(profile);
             Save();
         }
 
@@ -117,7 +231,22 @@ namespace IP_UpdateTest
         /// </summary>
         public static void Remove(string name)
         {
-            _profiles.RemoveAll(p => p.Name == name);
+            Profiles.RemoveAll(p => SameName(p.Name, name));
+            Save();
+        }
+
+        /// <summary>
+        /// 调整顺序，offset 为 -1 上移、1 下移
+        /// </summary>
+        public static void Move(string name, int offset)
+        {
+            int index = IndexOf(name);
+            int target = index + offset;
+            if (index < 0 || target < 0 || target >= Profiles.Count) return;
+
+            IpProfile profile = Profiles[index];
+            Profiles[index] = Profiles[target];
+            Profiles[target] = profile;
             Save();
         }
 
@@ -126,48 +255,49 @@ namespace IP_UpdateTest
         /// </summary>
         public static void Export(string filePath)
         {
-            File.WriteAllText(filePath, Serialize(_profiles), Encoding.UTF8);
+            File.WriteAllText(filePath, JsonFile.Serialize(Profiles), new UTF8Encoding(false));
         }
 
         /// <summary>
-        /// 从文件导入
+        /// 读取导入文件；格式不对时抛出 SerializationException
         /// </summary>
-        public static int Import(string filePath)
+        public static List<IpProfile> ReadFile(string filePath)
         {
-            var json = File.ReadAllText(filePath, Encoding.UTF8);
-            var imported = Deserialize<List<IpProfile>>(json);
-            if (imported == null) return 0;
+            List<IpProfile> imported = JsonFile.Deserialize<List<IpProfile>>(File.ReadAllText(filePath, Encoding.UTF8));
+            return (imported ?? new List<IpProfile>()).Where(p => p != null && !string.IsNullOrWhiteSpace(p.Name)).ToList();
+        }
 
-            int count = 0;
-            foreach (var p in imported)
+        /// <summary>
+        /// 导入方案；overwrite 为 true 时覆盖同名方案，否则跳过
+        /// </summary>
+        public static ImportResult Import(IEnumerable<IpProfile> imported, bool overwrite)
+        {
+            var result = new ImportResult();
+            foreach (IpProfile profile in imported)
             {
-                if (!_profiles.Exists(x => x.Name == p.Name))
+                int index = IndexOf(profile.Name);
+                if (index < 0)
                 {
-                    _profiles.Add(p);
-                    count++;
+                    Profiles.Add(profile);
+                    result.Added++;
+                }
+                else if (overwrite)
+                {
+                    Profiles[index] = profile;
+                    result.Replaced++;
+                }
+                else
+                {
+                    result.Skipped++;
                 }
             }
-            Save();
-            return count;
+            if (result.Added + result.Replaced > 0) Save();
+            return result;
         }
 
-        private static string Serialize<T>(T obj)
+        private static int IndexOf(string name)
         {
-            var serializer = new DataContractJsonSerializer(typeof(T));
-            using (var ms = new MemoryStream())
-            {
-                serializer.WriteObject(ms, obj);
-                return Encoding.UTF8.GetString(ms.ToArray());
-            }
-        }
-
-        private static T Deserialize<T>(string json)
-        {
-            var serializer = new DataContractJsonSerializer(typeof(T));
-            using (var ms = new MemoryStream(Encoding.UTF8.GetBytes(json)))
-            {
-                return (T)serializer.ReadObject(ms);
-            }
+            return Profiles.FindIndex(p => SameName(p.Name, name));
         }
     }
 }

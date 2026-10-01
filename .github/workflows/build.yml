@@ -3,14 +3,19 @@ name: build
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
+  workflow_dispatch:
+
+# 同一分支的运行依次执行，避免重复发布同一版本；PR 只保留最新一次
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: write # 推送 v* 标签时创建 Release
+      contents: write # 创建标签和 Release
 
     steps:
       - uses: actions/checkout@v7
@@ -19,17 +24,45 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: 确定版本
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # 版本号以 IP_UpdateTest.csproj 中的 <Version> 为准
+          $version = ([xml](Get-Content IP_UpdateTest/IP_UpdateTest.csproj -Raw)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if (-not $version) { throw 'IP_UpdateTest.csproj 中没有 <Version>' }
+          $tag = "v$version"
+          # 只有推送到 main（或在 main 上手动运行）且该版本还没有 Release 时才发布
+          $release = $false
+          if ($env:GITHUB_EVENT_NAME -ne 'pull_request' -and $env:GITHUB_REF -eq 'refs/heads/main') {
+            $output = gh release view $tag --json tagName 2>&1
+            if ($LASTEXITCODE -eq 0) { "$tag 已发布，本次只构建" }
+            elseif ("$output" -match 'not found') { $release = $true; "$tag 尚未发布，本次将发布" }
+            else { throw "查询 Release 失败：$output" }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "release=$($release.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          $global:LASTEXITCODE = 0
+
       - name: 构建并运行测试
         run: dotnet test IP_UpdateTest.sln -c Release
 
       - name: 打包
         shell: pwsh
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE: ${{ steps.version.outputs.release }}
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { $env:GITHUB_SHA.Substring(0, 7) }
+          # 不发布的构建在文件名中加上提交号，避免与正式版本混淆
+          $name = if ($env:RELEASE -eq 'true') { "IPTool-$env:TAG" } else { "IPTool-$env:TAG-$($env:GITHUB_SHA.Substring(0, 7))" }
           $out = 'IP_UpdateTest/bin/Release/net48'
           New-Item -ItemType Directory -Force dist | Out-Null
           # exe.config 中有高 DPI 设置，需与 exe 放在一起
-          Compress-Archive -Path "$out/IP_UpdateTest.exe", "$out/IP_UpdateTest.exe.config" -DestinationPath "dist/IPTool-$version.zip"
+          Compress-Archive -Path "$out/IP_UpdateTest.exe", "$out/IP_UpdateTest.exe.config" -DestinationPath "dist/$name.zip"
           Get-ChildItem dist/*.zip | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
             Set-Content dist/SHA256SUMS.txt
 
@@ -39,8 +72,29 @@ jobs:
           path: dist/
 
       - name: 发布 Release
-        if: github.ref_type == 'tag'
+        if: steps.version.outputs.release == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME dist/* --title $env:GITHUB_REF_NAME --generate-notes
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          # 说明 = CHANGELOG.md 中本版本的小节 + GitHub 自动生成的变更列表
+          $notes = [System.Collections.Generic.List[string]]::new()
+          $inSection = $false
+          foreach ($line in Get-Content CHANGELOG.md -Encoding utf8 -ErrorAction SilentlyContinue) {
+            if ($line -match '^## ') {
+              if ($inSection) { break }
+              $inSection = $line -match "^## \[?$([regex]::Escape($env:TAG))\]?(\s|$)"
+              continue
+            }
+            if ($inSection) { $notes.Add($line) }
+          }
+          # 标签不存在时由 gh 在本次构建的提交上创建
+          $ghArgs = @($env:TAG) + (Get-ChildItem dist | ForEach-Object FullName) + @('--target', $env:GITHUB_SHA, '--title', $env:TAG, '--generate-notes')
+          $text = ($notes -join "`n").Trim()
+          if ($text) {
+            Set-Content release-notes.md $text -Encoding utf8
+            $ghArgs += @('--notes-file', 'release-notes.md')
+          }
+          gh release create @ghArgs

@@ -30,19 +30,9 @@ Windows 网络配置工具：查看和修改网卡的 IPv4 配置（IP、子网�
 - 诊断：网关、外网（Windows NCSI 连通性检测，ping 兜底，可识别需要网页认证的网络）、各 DNS 服务器、域名解析，最后给出结论
 - DNS 测速：直接向各公共 DNS 发送查询（不经过系统缓存），按延迟排序后一键使用；可保存自定义 DNS 预设
 
+![网络诊断](screenshots/diagnose.png)
+
 ![DNS 测速](screenshots/dns_benchmark.png)
-
-诊断结果示例：
-
-```
-✓ 网卡：以太网 · 已连接 · 1 Gbps
-✓ 网关：192.168.3.1 延迟 0 ms
-✓ 外网：正常（HTTP 532 ms）
-✓ DNS 192.168.3.1：响应 4 ms
-✓ 域名解析：www.baidu.com → 183.2.172.177（5 ms）
-
-结论：网络连接正常
-```
 
 ### 报表
 - 按“已连接 / 物理网卡 / 全部网卡”筛选，可复制或导出为 TXT / JSON
@@ -91,7 +81,15 @@ dotnet build IP_UpdateTest.sln -c Release   # 输出在 IP_UpdateTest/bin/Releas
 dotnet test IP_UpdateTest.sln
 ```
 
-推送 `v*` 标签时，GitHub Actions 会自动构建、测试并发布 Release。
+## 发布
+
+推送到 main 后，GitHub Actions 会构建并运行测试；如果 `IP_UpdateTest/IP_UpdateTest.csproj` 中的 `<Version>` 还没有对应的 Release，会自动创建标签 `v<版本号>` 并发布 Release（附 zip 和 SHA256SUMS.txt）。版本号不变时只构建，不发布。
+
+发布新版本：
+
+1. 修改 `IP_UpdateTest/IP_UpdateTest.csproj` 中的 `<Version>`
+2. 在 `CHANGELOG.md` 中添加对应版本的小节（如 `## v2.0.1`），内容会作为 Release 说明
+3. 提交并推送到 main
 
 ## 技术栈
 

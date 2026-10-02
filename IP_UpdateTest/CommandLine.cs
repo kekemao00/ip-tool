@@ -13,6 +13,7 @@ using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Text;
 using IP_UpdateTest.Core;
+using IP_UpdateTest.Core.Diagnosis;
 
 namespace IP_UpdateTest
 {
@@ -28,7 +29,8 @@ namespace IP_UpdateTest
         Dhcp,
         Profile,
         Enable,
-        Disable
+        Disable,
+        Diagnose
     }
 
     /// <summary>
@@ -74,27 +76,31 @@ namespace IP_UpdateTest
         public const int ExitInvalid = 3;
         public const int ExitFailed = 4;
         public const int ExitElevation = 5;
+        public const int ExitProblemFound = 6;
 
         public const string Usage =
 @"用法：
   IP_UpdateTest.exe --list [--json]
+  IP_UpdateTest.exe --diagnose [--adapter <网卡>] [--json]
   IP_UpdateTest.exe --adapter <网卡> --static <IP>[/<前缀>] [--mask <掩码>] [--gateway <网关>] [--dns <DNS1>[,<DNS2>]]
   IP_UpdateTest.exe --adapter <网卡> --dhcp [--dns <DNS1>[,<DNS2>]]
   IP_UpdateTest.exe --adapter <网卡> --profile <配置方案名称>
   IP_UpdateTest.exe --adapter <网卡> --enable | --disable
 
   <网卡> 可以是连接名称（如 以太网、WLAN）、接口索引或网卡 GUID。
+  --diagnose 依次检测本机网卡、路由器、外网、DNS、代理/VPN、UDP，指出问题所在环节并给出建议；
+  不指定网卡时诊断当前上网的网卡，不需要管理员权限。
   --static 未指定 --gateway 时不设网关，未指定 --dns 时清空 DNS；
   --dhcp 未指定 --dns 时 DNS 也自动获取。
   非管理员运行时会请求提权；加 --no-elevate 则直接以退出码 5 结束。
   本程序是窗口程序：在 cmd 中用 start /wait 运行才能拿到退出码，
   PowerShell 中可用 Start-Process -Wait -PassThru。
 
-退出码：0 成功，1 参数错误，2 找不到网卡，3 配置无效，4 应用失败，5 需要管理员权限";
+退出码：0 成功，1 参数错误，2 找不到网卡，3 配置无效，4 应用失败，5 需要管理员权限，6 诊断发现问题";
 
         private static readonly HashSet<string> ActionSwitches = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "--list", "--static", "--dhcp", "--profile", "--enable", "--disable", "--help", "-h", "/?"
+            "--list", "--diagnose", "--static", "--dhcp", "--profile", "--enable", "--disable", "--help", "-h", "/?"
         };
 
         /// <summary>
@@ -129,6 +135,9 @@ namespace IP_UpdateTest
                 {
                     case "--list":
                         actions.Add(CliAction.List);
+                        break;
+                    case "--diagnose":
+                        actions.Add(CliAction.Diagnose);
                         break;
                     case "--json":
                         options.Json = true;
@@ -208,6 +217,12 @@ namespace IP_UpdateTest
             options.Action = actions[0];
 
             if (options.Action == CliAction.Help || options.Action == CliAction.List) return options;
+            if (options.Action == CliAction.Diagnose)
+            {
+                if (options.SubnetMask != null || options.Gateway != null || options.Dns != null)
+                    return Fail(options, "--diagnose 只能与 --adapter、--json 一起使用");
+                return options;
+            }
             if (string.IsNullOrWhiteSpace(options.Adapter)) return Fail(options, "请用 --adapter 指定网卡");
             if (options.Action == CliAction.Static && string.IsNullOrWhiteSpace(options.SubnetMask))
                 return Fail(options, "请用 IP/前缀（如 192.168.1.10/24）或 --mask 指定子网掩码");
@@ -261,6 +276,8 @@ namespace IP_UpdateTest
                     return ExitOk;
                 case CliAction.List:
                     return ListAdapters(options.Json, output);
+                case CliAction.Diagnose:
+                    return Diagnose(options, output);
             }
 
             // 先在普通权限下检查网卡和参数，写错时不必弹出 UAC
@@ -371,6 +388,34 @@ namespace IP_UpdateTest
                 output.Line($"    MAC：{Dash(a.MacAddressText)}    GUID：{a.NetworkInterfaceID}");
             }
             return ExitOk;
+        }
+
+        private static int Diagnose(CliOptions options, CliOutput output)
+        {
+            List<NetworkAdapter> adapters = AdapterService.GetAdapters(true);
+            NetworkAdapter adapter;
+            if (options.Adapter != null)
+            {
+                adapter = AdapterService.MatchAdapter(adapters, options.Adapter);
+                if (adapter == null)
+                {
+                    output.Line($"错误：找不到网卡“{options.Adapter}”，可用 --list 查看所有网卡");
+                    return ExitAdapterNotFound;
+                }
+            }
+            else
+            {
+                // 默认诊断当前上网的网卡，找不到时取第一个已连接的物理网卡
+                int primary = AdapterService.GetPrimaryInterfaceIndex();
+                adapter = adapters.FirstOrDefault(a => primary >= 0 && a.InterfaceIndex == primary)
+                    ?? adapters.FirstOrDefault(a => a.Status == AdapterStatus.Connected && a.IsPhysical)
+                    ?? adapters.FirstOrDefault(a => a.IsPhysical);
+            }
+
+            if (!options.Json) output.Line("正在诊断，约需 10 秒…");
+            DiagnosisReport report = NetworkDiagnosis.RunAsync(adapter).GetAwaiter().GetResult();
+            output.Line(options.Json ? report.ToJson() : report.ToText());
+            return report.FaultLayer.HasValue ? ExitProblemFound : ExitOk;
         }
 
         private static string Dash(string value)

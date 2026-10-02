@@ -1159,29 +1159,9 @@ namespace IP_UpdateTest
 
         #region 诊断与报表
 
-        private async void btnDiagnose_Click(object sender, EventArgs e)
+        private void btnDiagnose_Click(object sender, EventArgs e)
         {
-            string text = btnDiagnose.Text;
-            btnDiagnose.Enabled = false;
-            btnDiagnose.Text = "诊断中…";
-            try
-            {
-                NetworkAdapter adapter = SelectedAdapter;
-                DiagnosticReport report = await NetworkTester.DiagnoseAsync(adapter);
-                if (!IsDisposed)
-                {
-                    string title = adapter == null ? "网络诊断" : "网络诊断 - " + adapter.Name;
-                    UITheme.ShowMessage(report.ToText() + "\n（按 Ctrl+C 可复制本报告）", title);
-                }
-            }
-            finally
-            {
-                if (!IsDisposed)
-                {
-                    btnDiagnose.Text = text;
-                    btnDiagnose.Enabled = true;
-                }
-            }
+            new FrmDiagnosis(SelectedAdapter).Show(this);
         }
 
         private void btnReport_Click(object sender, EventArgs e)

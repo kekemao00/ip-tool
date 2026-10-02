@@ -62,6 +62,8 @@ namespace IP_UpdateTest.Tests
         [InlineData(new[] { "--adapter", "WLAN", "--dhcp", "--backend", "none" }, "--backend")]
         [InlineData(new[] { "--adapter" }, "--adapter")]
         [InlineData(new[] { "--list", "--bogus" }, "--bogus")]
+        [InlineData(new[] { "--diagnose", "--dns", "223.5.5.5" }, "--diagnose")]
+        [InlineData(new[] { "--diagnose", "--list" }, "一次只能")]
         public void Parse_Errors(string[] args, string expected)
         {
             CliOptions o = CommandLine.Parse(args);
@@ -77,6 +79,21 @@ namespace IP_UpdateTest.Tests
 
             Assert.Null(o.Error);
             Assert.Equal(CliAction.List, o.Action);
+            Assert.True(o.Json);
+        }
+
+        [Fact]
+        public void Parse_Diagnose()
+        {
+            CliOptions o = CommandLine.Parse(new[] { "--diagnose" });
+            Assert.Null(o.Error);
+            Assert.Equal(CliAction.Diagnose, o.Action);
+            Assert.Null(o.Adapter);
+            Assert.True(CommandLine.IsCliInvocation(new[] { "--diagnose" }));
+
+            o = CommandLine.Parse(new[] { "--diagnose", "--adapter", "WLAN", "--json" });
+            Assert.Null(o.Error);
+            Assert.Equal("WLAN", o.Adapter);
             Assert.True(o.Json);
         }
 

@@ -2,6 +2,16 @@
 
 <!-- 发布新版本时在下面添加 “## v<版本号>” 小节（与 IP_UpdateTest.csproj 中的 <Version> 一致），推送到 main 后其内容会作为 GitHub Release 的说明 -->
 
+## 未发布
+
+### 新功能
+
+- 网络诊断改为分层检测：本机网卡 → 路由器 → 外网 → DNS → 代理/VPN → UDP，指出最先出问题的环节并给出排查建议；可复制、导出 TXT / JSON
+- 新增检测：Wi-Fi 信号、多个默认网关、双重 NAT、运营商级 NAT、路径 MTU、HTTPS 证书被替换、DNS 劫持、hosts 条目
+- 代理 / VPN：系统代理、PAC、WinHTTP 代理、环境变量代理是否可连接，代理是否可用，VPN / TUN 网卡、Fake-IP、代理程序、国际网站可达性
+- UDP：识别 UDP 被封锁或只放行 DNS，通过 STUN 判断 NAT 类型
+- 命令行：`--diagnose [--adapter <网卡>] [--json]`，发现问题时退出码为 6
+
 ## v2.0.0
 
 界面重写，新增配置方案管理、托盘、命令行、网络诊断与 DNS 测速。

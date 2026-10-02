@@ -114,7 +114,7 @@ namespace IP_UpdateTest.Core
             return ApplyResult.Ok();
         }
 
-        private static void Execute(string arguments, out int exitCode, out string output)
+        internal static void Execute(string arguments, out int exitCode, out string output)
         {
             var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "netsh.exe"), arguments)
             {

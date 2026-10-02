@@ -27,7 +27,13 @@ Windows 网络配置工具：查看和修改网卡的 IPv4 配置（IP、子网�
 ![配置方案](screenshots/profile.png)
 
 ### 网络诊断与 DNS 测速
-- 诊断：网关、外网（Windows NCSI 连通性检测，ping 兜底，可识别需要网页认证的网络）、各 DNS 服务器、域名解析，最后给出结论
+- 分层诊断：按“本机网卡 → 路由器 → 外网 → DNS → 代理/VPN → UDP”的顺序逐个环节检测，指出最先出问题的环节，并给出每一项的排查或处理建议；可复制或导出 TXT（附网卡信息）/ JSON
+  - 本机网卡：连接状态、IP 是否为 169.254.x.x（DHCP 失败）、网关是否同网段、多个网卡都有默认网关、Wi-Fi 信号强度
+  - 路由器：丢包与延迟（ping 不通时用 ARP 判断路由器是否在线）、双重 NAT（光猫 + 路由器）、运营商级 NAT（没有公网 IPv4）
+  - 外网：ping、TCP、HTTP（直连，不经代理）分别检测，可识别禁 ping 网络和需要网页认证的网络；HTTPS 证书被替换；路径 MTU
+  - DNS：各 DNS 服务器直接查询、系统解析、DNS 劫持（不存在的域名被解析）、hosts 自定义条目
+  - 代理/VPN：系统代理、PAC、WinHTTP 代理、HTTP_PROXY 等环境变量是否可连接（代理软件退出后残留的系统代理是常见的“有网但打不开网页”原因）；代理是否真正可用；VPN / TUN 网卡与默认路由、Fake-IP（198.18.x.x）、正在运行的代理程序、国际网站可达性
+  - UDP：公共 DNS（UDP 53）与 STUN（UDP 3478）是否有应答，识别 UDP 被封锁或只放行 DNS；根据 STUN 结果判断 NAT 类型（对称型 NAT 会影响 P2P 联机、游戏语音）
 - DNS 测速：直接向各公共 DNS 发送查询（不经过系统缓存），按延迟排序后一键使用；可保存自定义 DNS 预设
 
 ![网络诊断](screenshots/diagnose.png)
@@ -50,6 +56,7 @@ Windows 网络配置工具：查看和修改网卡的 IPv4 配置（IP、子网�
 
 ```
 IP_UpdateTest.exe --list [--json]
+IP_UpdateTest.exe --diagnose [--adapter <网卡>] [--json]
 IP_UpdateTest.exe --adapter <网卡> --static <IP>[/<前缀>] [--mask <掩码>] [--gateway <网关>] [--dns <DNS1>[,<DNS2>]]
 IP_UpdateTest.exe --adapter <网卡> --dhcp [--dns <DNS1>[,<DNS2>]]
 IP_UpdateTest.exe --adapter <网卡> --profile <配置方案名称>
@@ -57,14 +64,16 @@ IP_UpdateTest.exe --adapter <网卡> --enable | --disable
 ```
 
 - `<网卡>` 可以是连接名称（如 `以太网`、`WLAN`）、接口索引或网卡 GUID
+- `--diagnose` 进行分层网络诊断，不指定网卡时诊断当前上网的网卡；不需要管理员权限，发现问题时退出码为 6
 - `--static` 未指定 `--gateway` 时不设网关，未指定 `--dns` 时清空 DNS；`--dhcp` 未指定 `--dns` 时 DNS 也自动获取
 - 非管理员运行时会请求提权；加 `--no-elevate` 则不提权，直接以退出码 5 结束
-- 退出码：0 成功，1 参数错误，2 找不到网卡，3 配置无效，4 应用失败，5 需要管理员权限
+- 退出码：0 成功，1 参数错误，2 找不到网卡，3 配置无效，4 应用失败，5 需要管理员权限，6 诊断发现问题
 - 本程序是窗口程序：在 cmd 中用 `start /wait` 运行才能拿到退出码，PowerShell 中可用 `Start-Process -Wait -PassThru`
 
 ```bat
 start /wait IP_UpdateTest.exe --adapter 以太网 --static 192.168.1.100/24 --gateway 192.168.1.1 --dns 223.5.5.5,119.29.29.29
 start /wait IP_UpdateTest.exe --adapter 以太网 --dhcp
+IP_UpdateTest.exe --diagnose > 诊断.txt
 ```
 
 ## 运行环境

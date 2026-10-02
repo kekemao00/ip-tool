@@ -15,7 +15,7 @@
 
   <!-- 程序集信息（由 SDK 生成；ComVisible/Guid 保留在 Properties\AssemblyInfo.cs） -->
   <PropertyGroup>
-    <Version>2.0.0</Version>
+    <Version>2.1.0</Version>
     <AssemblyTitle>IP Tool</AssemblyTitle>
     <Product>IP Tool</Product>
     <Description>Windows 网络配置工具</Description>

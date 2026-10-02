@@ -1,13 +1,21 @@
 # IP Tool
 
-![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/kekemao00/ip-tool)
-![GitHub last commit](https://img.shields.io/github/last-commit/kekemao00/ip-tool)
+[![Release](https://img.shields.io/github/v/release/kekemao00/ip-tool)](https://github.com/kekemao00/ip-tool/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/kekemao00/ip-tool/build.yml?branch=main)](https://github.com/kekemao00/ip-tool/actions/workflows/build.yml)
+[![License](https://img.shields.io/github/license/kekemao00/ip-tool)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows-blue)
 
-## 简介
-
-Windows 网络配置工具：查看和修改网卡的 IPv4 配置（IP、子网掩码、网关、DNS），一键切换常用配置方案，并提供网络诊断与 DNS 测速。
+Windows 网络配置与诊断工具：一键切换网卡 IP / DNS 方案，分层诊断定位断网环节（网卡、路由器、DNS、代理/VPN、UDP），附 DNS 测速与命令行。
 
 ![主界面](screenshots/main.png)
+
+## 下载
+
+在 [Releases](https://github.com/kekemao00/ip-tool/releases/latest) 下载 zip，解压后运行 `IP_UpdateTest.exe`，无需安装。
+
+- 需要 .NET Framework 4.8：Windows 10 1903 及以上、Windows 11 已自带
+- 请把 `IP_UpdateTest.exe.config` 和 exe 放在一起（其中有高 DPI 设置）
+- 每个 Release 附有 `SHA256SUMS.txt`，可用于校验下载的文件
 
 ## 功能
 
@@ -76,11 +84,6 @@ start /wait IP_UpdateTest.exe --adapter 以太网 --dhcp
 IP_UpdateTest.exe --diagnose > 诊断.txt
 ```
 
-## 运行环境
-
-- .NET Framework 4.8：Windows 10 1903 及以上、Windows 11 已自带
-- 发布后可在 [Releases](https://github.com/kekemao00/ip-tool/releases) 下载 zip，解压后运行 `IP_UpdateTest.exe`（`IP_UpdateTest.exe.config` 中有高 DPI 设置，请放在一起）
-
 ## 构建
 
 只需要 [.NET SDK](https://dotnet.microsoft.com/download)（已用 10.0 验证），不需要安装 Visual Studio：
@@ -108,4 +111,4 @@ dotnet test IP_UpdateTest.sln
 
 ## License
 
-MIT
+本项目基于 [Apache License 2.0](LICENSE) 开源。

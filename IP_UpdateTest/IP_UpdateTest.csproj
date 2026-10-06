@@ -5,7 +5,7 @@
     <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>IP_UpdateTest</RootNamespace>
-    <AssemblyName>IP_UpdateTest</AssemblyName>
+    <AssemblyName>IPTool</AssemblyName>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <ApplicationManifest>Properties\app.manifest</ApplicationManifest>
     <!-- 调用 netsh 等系统工具时避免被重定向到 SysWOW64 -->
@@ -15,7 +15,7 @@
 
   <!-- 程序集信息（由 SDK 生成；ComVisible/Guid 保留在 Properties\AssemblyInfo.cs） -->
   <PropertyGroup>
-    <Version>2.2.1</Version>
+    <Version>2.2.2</Version>
     <AssemblyTitle>IP Tool</AssemblyTitle>
     <Product>IP Tool</Product>
     <Description>Windows 网络配置工具</Description>

@@ -11,10 +11,10 @@ Windows 网络配置与诊断工具：一键切换网卡 IP / DNS 方案，分�
 
 ## 下载
 
-在 [Releases](https://github.com/kekemao00/ip-tool/releases/latest) 下载 zip，解压后运行 `IP_UpdateTest.exe`，无需安装。
+在 [Releases](https://github.com/kekemao00/ip-tool/releases/latest) 下载 zip，解压后运行 `IPTool.exe`，无需安装。
 
 - 需要 .NET Framework 4.8：Windows 10 1903 及以上、Windows 11 已自带
-- 请把 `IP_UpdateTest.exe.config` 和 exe 放在一起（其中有高 DPI 设置）
+- 请把 `IPTool.exe.config` 和 exe 放在一起（其中有高 DPI 设置）
 - 每个 Release 附有 `SHA256SUMS.txt`，可用于校验下载的文件
 
 ## 功能
@@ -67,12 +67,12 @@ Windows 网络配置与诊断工具：一键切换网卡 IP / DNS 方案，分�
 ## 命令行
 
 ```
-IP_UpdateTest.exe --list [--json]
-IP_UpdateTest.exe --diagnose [--adapter <网卡>] [--json]
-IP_UpdateTest.exe --adapter <网卡> --static <IP>[/<前缀>] [--mask <掩码>] [--gateway <网关>] [--dns <DNS1>[,<DNS2>]]
-IP_UpdateTest.exe --adapter <网卡> --dhcp [--dns <DNS1>[,<DNS2>]]
-IP_UpdateTest.exe --adapter <网卡> --profile <配置方案名称>
-IP_UpdateTest.exe --adapter <网卡> --enable | --disable
+IPTool.exe --list [--json]
+IPTool.exe --diagnose [--adapter <网卡>] [--json]
+IPTool.exe --adapter <网卡> --static <IP>[/<前缀>] [--mask <掩码>] [--gateway <网关>] [--dns <DNS1>[,<DNS2>]]
+IPTool.exe --adapter <网卡> --dhcp [--dns <DNS1>[,<DNS2>]]
+IPTool.exe --adapter <网卡> --profile <配置方案名称>
+IPTool.exe --adapter <网卡> --enable | --disable
 ```
 
 - `<网卡>` 可以是连接名称（如 `以太网`、`WLAN`）、接口索引或网卡 GUID
@@ -83,9 +83,9 @@ IP_UpdateTest.exe --adapter <网卡> --enable | --disable
 - 本程序是窗口程序：在 cmd 中用 `start /wait` 运行才能拿到退出码，PowerShell 中可用 `Start-Process -Wait -PassThru`
 
 ```bat
-start /wait IP_UpdateTest.exe --adapter 以太网 --static 192.168.1.100/24 --gateway 192.168.1.1 --dns 223.5.5.5,119.29.29.29
-start /wait IP_UpdateTest.exe --adapter 以太网 --dhcp
-IP_UpdateTest.exe --diagnose > 诊断.txt
+start /wait IPTool.exe --adapter 以太网 --static 192.168.1.100/24 --gateway 192.168.1.1 --dns 223.5.5.5,119.29.29.29
+start /wait IPTool.exe --adapter 以太网 --dhcp
+IPTool.exe --diagnose > 诊断.txt
 ```
 
 ## 构建

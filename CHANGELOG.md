@@ -2,6 +2,13 @@
 
 <!-- 发布新版本时在下面添加 “## v<版本号>” 小节（与 IP_UpdateTest.csproj 中的 <Version> 一致），推送到 main 后其内容会作为 GitHub Release 的说明 -->
 
+## v2.2.2
+
+### 改进
+
+- 程序文件改名为 `IPTool.exe`（原 `IP_UpdateTest.exe`），与 Release 压缩包名称一致；命令行用法和 README 同步更新
+- 从旧版升级：配置方案和设置仍在 `%APPDATA%\IPTool`，不受影响；若开启过开机自动启动，新版首次运行时会自动把启动项改为指向 `IPTool.exe`。旧的 `IP_UpdateTest.exe` 和 `IP_UpdateTest.exe.config` 可以删除
+
 ## v2.2.1
 
 ### 改进

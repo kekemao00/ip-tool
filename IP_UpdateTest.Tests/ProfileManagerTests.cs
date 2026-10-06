@@ -10,6 +10,7 @@ namespace IP_UpdateTest.Tests
     /// <summary>
     /// 配置方案存储。ProfileManager 是静态类，这里每个用例都改用临时目录中的文件。
     /// </summary>
+    [Collection("ProfileStore")]
     public class ProfileManagerTests : IDisposable
     {
         private readonly string directory = Path.Combine(Path.GetTempPath(), "IPToolTests", Guid.NewGuid().ToString("N"));

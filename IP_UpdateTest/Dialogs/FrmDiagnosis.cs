@@ -1,6 +1,5 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -8,131 +7,138 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using IP_UpdateTest.Core;
 using IP_UpdateTest.Core.Diagnosis;
+using IP_UpdateTest.Ui;
 
 namespace IP_UpdateTest
 {
     /// <summary>
     /// 分层网络诊断：从本机网卡到外网逐个环节检测，指出问题所在环节并给出建议，可复制或导出
     /// </summary>
-    public class FrmDiagnosis : DialogBase
+    public class FrmDiagnosis : ThemedForm
     {
-        private static readonly Color WarningColor = Color.FromArgb(192, 86, 33);
-
         private readonly NetworkAdapter adapter;
-        private readonly RichTextBox txtReport = new RichTextBox
+        private readonly ReportView view = new ReportView();
+        private readonly SpringButton btnCopy = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Copy, Text = "复制" };
+        private readonly SpringButton btnExport = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Download, Text = "导出" };
+        private readonly SpringButton btnClose = new SpringButton { Kind = ButtonKind.Secondary, Text = "关闭" };
+        private readonly SpringButton btnRerun = new SpringButton { Kind = ButtonKind.Primary, Glyph = Glyph.Refresh, Text = "重新诊断" };
+        private bool running;
+
+        public FrmDiagnosis(NetworkAdapter adapter) : this(adapter, null)
         {
-            Dock = DockStyle.Fill,
-            ReadOnly = true,
-            BorderStyle = BorderStyle.None,
-            WordWrap = true,
-            DetectUrls = false
-        };
+        }
 
-        private readonly Button btnRerun;
-        private readonly Button btnCopy;
-        private readonly Button btnExport;
-        private DiagnosisReport report;
-
-        public FrmDiagnosis(NetworkAdapter adapter)
-            : base(adapter == null ? "网络诊断" : "网络诊断 - " + adapter.Name, 760, 600)
+        /// <summary>
+        /// 直接显示给定的报告，不运行诊断（界面截图测试用）
+        /// </summary>
+        internal FrmDiagnosis(NetworkAdapter adapter, DiagnosisReport report)
         {
             this.adapter = adapter;
+            Text = "网络诊断";
+            TitleBar.Subtitle = adapter == null ? null : adapter.Name;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
+            SetLogicalSize(760, 640);
 
-            // RichTextBox 不支持 Padding，放在带内边距的面板里
-            var border = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10, 8, 4, 8), BorderStyle = BorderStyle.FixedSingle };
-            border.Controls.Add(txtReport);
-            ContentPanel.Controls.Add(border);
+            InkToolTip.Shared.SetToolTip(btnCopy, "复制为文本（Ctrl+C）");
+            InkToolTip.Shared.SetToolTip(btnExport, "导出为文本或 JSON");
+            btnCopy.Click += (s, e) => CopyReport();
+            btnExport.Click += async (s, e) => await ExportAsync();
+            btnClose.Click += (s, e) => Close();
+            btnRerun.Click += async (s, e) => await RunAsync();
 
-            AddButton("关闭", false, (s, e) => Close());
-            btnExport = AddButton("导出…", false, async (s, e) => await ExportAsync());
-            btnCopy = AddButton("复制", false, (s, e) => CopyReport());
-            btnRerun = AddButton("重新诊断", true, async (s, e) => await RunAsync());
-            FinishLayout();
+            Controls.AddRange(new Control[] { view, btnCopy, btnExport, btnClose, btnRerun });
+            int tab = 0;
+            foreach (Control c in new Control[] { view, btnCopy, btnExport, btnClose, btnRerun })
+                c.TabIndex = tab++;
+            CancelButton = btnClose;
 
-            border.BackColor = txtReport.BackColor = UITheme.CardBackground;
-            txtReport.ForeColor = UITheme.TextPrimary;
-            txtReport.Font = UITheme.InputFont;
+            Load += async (s, e) =>
+            {
+                if (report == null)
+                {
+                    await RunAsync();
+                    return;
+                }
+                view.ShowReport(report);
+                btnCopy.Enabled = btnExport.Enabled = true;
+            };
+        }
 
-            Load += async (s, e) => await RunAsync();
+        protected override void LayoutContent(float s)
+        {
+            int gutter = P(Metrics.PageGutter);
+            int top = P(Metrics.TitleBarHeight + 4);
+            int h = P(Metrics.ButtonHeight);
+            int footerH = P(Metrics.PrimaryHeight);
+            int footerY = ClientSize.Height - P(20) - footerH;
+            view.SetBounds(gutter, top, ClientSize.Width - gutter * 2, footerY - P(16) - top);
+
+            int rerunW = Math.Max(P(132), btnRerun.PreferredWidth);
+            btnRerun.SetBounds(ClientSize.Width - gutter - rerunW, footerY, rerunW, footerH);
+            int closeW = Math.Max(P(84), btnClose.PreferredWidth);
+            btnClose.SetBounds(btnRerun.Left - P(8) - closeW, footerY + (footerH - h) / 2, closeW, h);
+            int y = footerY + (footerH - h) / 2;
+            btnCopy.SetBounds(gutter, y, Math.Max(P(84), btnCopy.PreferredWidth), h);
+            btnExport.SetBounds(btnCopy.Right + P(8), y, Math.Max(P(84), btnExport.PreferredWidth), h);
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.C) && view.Report != null && !HasSheet)
+            {
+                CopyReport();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private async Task RunAsync()
         {
-            btnRerun.Enabled = btnCopy.Enabled = btnExport.Enabled = false;
-            txtReport.ForeColor = UITheme.TextSecondary;
-            txtReport.Text = "正在诊断：本机网卡 → 路由器 → 外网 → DNS → 代理/VPN → UDP，约需 10 秒…";
+            if (running) return;
+            running = true;
+            btnCopy.Enabled = btnExport.Enabled = false;
+            btnRerun.BeginLoading();
+            view.ShowMessage("正在诊断：本机网卡 → 路由器 → 外网 → DNS → 代理/VPN → UDP，约需 10 秒", true);
+            DiagnosisReport report = null;
             try
             {
                 report = await NetworkDiagnosis.RunAsync(adapter);
                 if (IsDisposed) return;
-                ShowReport(report.ToText());
+                view.ShowReport(report);
+                btnRerun.Succeed();
+                if (report.FaultLayer.HasValue) Notify(NoticeKind.Warning, "诊断完成：发现问题，建议见报告");
+                else Notify(NoticeKind.Success, "诊断完成：各环节正常");
             }
             catch (Exception ex) when (ex is System.Net.NetworkInformation.NetworkInformationException
                 || ex is System.Net.Sockets.SocketException || ex is InvalidOperationException)
             {
                 if (IsDisposed) return;
-                report = null;
-                txtReport.Text = "诊断失败：" + ex.Message;
+                view.ShowMessage("诊断失败：" + ex.Message, false);
+                btnRerun.Fail("诊断失败");
             }
             finally
             {
                 if (!IsDisposed)
                 {
-                    btnRerun.Enabled = true;
+                    running = false;
                     btnCopy.Enabled = btnExport.Enabled = report != null;
                 }
             }
         }
 
-        /// <summary>
-        /// 显示报告，按状态给各行着色
-        /// </summary>
-        private void ShowReport(string text)
-        {
-            txtReport.ForeColor = UITheme.TextPrimary;
-            txtReport.Text = text;
-            // 自动换行时 GetFirstCharIndexFromLine 按显示行计算，这里自己累计逻辑行的起点（RichTextBox 内部以 \n 换行）
-            int start = 0;
-            foreach (string line in txtReport.Lines)
-            {
-                int lineStart = start;
-                start += line.Length + 1;
-                string trimmed = line.TrimStart();
-                Color? color = null;
-                bool bold = false;
-                if (line.StartsWith("结论", StringComparison.Ordinal))
-                {
-                    color = report.FaultLayer.HasValue ? UITheme.DangerText : UITheme.SuccessText;
-                    bold = true;
-                }
-                else if (line.StartsWith("[", StringComparison.Ordinal) || line.StartsWith("建议", StringComparison.Ordinal)) bold = true;
-                else if (trimmed.StartsWith("×", StringComparison.Ordinal)) color = UITheme.DangerText;
-                else if (trimmed.StartsWith("! ", StringComparison.Ordinal)) color = WarningColor;
-                else if (trimmed.StartsWith("√", StringComparison.Ordinal)) color = UITheme.SuccessText;
-                else if (trimmed.StartsWith("→", StringComparison.Ordinal) || trimmed.StartsWith("·", StringComparison.Ordinal)
-                    || trimmed.StartsWith("- ", StringComparison.Ordinal) || line.StartsWith("说明", StringComparison.Ordinal))
-                    color = UITheme.TextSecondary;
-
-                if (color == null && !bold) continue;
-                txtReport.Select(lineStart, line.Length);
-                if (color != null) txtReport.SelectionColor = color.Value;
-                if (bold) txtReport.SelectionFont = new Font(txtReport.Font, FontStyle.Bold);
-            }
-            txtReport.Select(0, 0);
-        }
-
         private void CopyReport()
         {
+            DiagnosisReport report = view.Report;
+            if (report == null) return;
             try
             {
                 Clipboard.SetText(report.ToText());
-                btnCopy.Text = "已复制";
+                Notify(NoticeKind.Success, "诊断报告已复制");
             }
             catch (System.Runtime.InteropServices.ExternalException)
             {
-                UITheme.ShowMessage("剪贴板被其他程序占用，请稍后再试", "复制", MessageBoxIcon.Warning);
+                Notify(NoticeKind.Warning, "剪贴板被其他程序占用，请稍后再试");
             }
         }
 
@@ -141,6 +147,10 @@ namespace IP_UpdateTest
         /// </summary>
         private async Task ExportAsync()
         {
+            DiagnosisReport report = view.Report;
+            if (report == null) return;
+            string fileName;
+            int filterIndex;
             using (var dialog = new SaveFileDialog
             {
                 Filter = "文本文件|*.txt|JSON 文件|*.json",
@@ -148,27 +158,30 @@ namespace IP_UpdateTest
             })
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
-                try
+                fileName = dialog.FileName;
+                filterIndex = dialog.FilterIndex;
+            }
+
+            try
+            {
+                if (filterIndex == 2)
                 {
-                    if (dialog.FilterIndex == 2)
-                    {
-                        File.WriteAllText(dialog.FileName, report.ToJson(), new UTF8Encoding(false));
-                    }
-                    else
-                    {
-                        List<NetworkAdapter> adapters = await Task.Run(() => AdapterService.GetAdapters(true));
-                        List<NetworkAdapter> connected = adapters.Where(a => a.Status == AdapterStatus.Connected).ToList();
-                        string text = report.ToText() + Environment.NewLine + AdapterReport.Build(connected, DateTime.Now);
-                        // 带 BOM 的 UTF-8，旧版记事本也能正确显示中文
-                        File.WriteAllText(dialog.FileName, text, new UTF8Encoding(true));
-                    }
-                    UITheme.ShowMessage("已导出到 " + dialog.FileName, "导出诊断报告");
+                    File.WriteAllText(fileName, report.ToJson(), new UTF8Encoding(false));
                 }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException
-                    || ex is System.Management.ManagementException || ex is System.Net.NetworkInformation.NetworkInformationException)
+                else
                 {
-                    UITheme.ShowMessage("导出失败：" + ex.Message, "导出诊断报告", MessageBoxIcon.Error);
+                    List<NetworkAdapter> adapters = await Task.Run(() => AdapterService.GetAdapters(true));
+                    List<NetworkAdapter> connected = adapters.Where(a => a.Status == AdapterStatus.Connected).ToList();
+                    string text = report.ToText() + Environment.NewLine + AdapterReport.Build(connected, DateTime.Now);
+                    // 带 BOM 的 UTF-8，旧版记事本也能正确显示中文
+                    File.WriteAllText(fileName, text, new UTF8Encoding(true));
                 }
+                if (!IsDisposed) Notify(NoticeKind.Success, "已导出到 " + Path.GetFileName(fileName));
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException
+                || ex is System.Management.ManagementException || ex is System.Net.NetworkInformation.NetworkInformationException)
+            {
+                if (!IsDisposed) Notify(NoticeKind.Error, "导出失败：" + ex.Message);
             }
         }
     }

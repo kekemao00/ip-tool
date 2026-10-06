@@ -61,6 +61,18 @@ jobs:
           path: ui-snapshots/
           if-no-files-found: ignore
 
+      # 临时：把截图以 base64 打印到日志（合并前删除）
+      - name: 输出截图
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem ui-snapshots/*.png -ErrorAction SilentlyContinue | ForEach-Object {
+            "SNAP-BEGIN $($_.Name)"
+            $b = [Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName))
+            for ($i = 0; $i -lt $b.Length; $i += 4000) { "SNAP " + $b.Substring($i, [Math]::Min(4000, $b.Length - $i)) }
+            "SNAP-END $($_.Name)"
+          }
+
       - name: 打包
         shell: pwsh
         env:

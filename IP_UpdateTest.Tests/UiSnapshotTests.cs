@@ -86,6 +86,18 @@ namespace IP_UpdateTest.Tests
                 CloseSheets(form);
                 Assert.True(confirm.IsCompleted);
             }
+
+            // 管理员权限下（README 用）：没有提权提示条，标题栏显示“管理员”
+            using (var form = new FrmMain(null, false, new AppSettings(), true) { SnapshotMode = true })
+            {
+                Open(form);
+                form.BindAdapterList(adapters);
+                Save(form, "main-admin");
+
+                form.OpenCommandPalette();
+                Save(form, "main-admin-palette");
+                CloseSheets(form);
+            }
         }
 
         private void RenderProfiles(List<NetworkAdapter> adapters)

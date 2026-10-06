@@ -72,7 +72,7 @@ jobs:
           $out = 'IP_UpdateTest/bin/Release/net48'
           New-Item -ItemType Directory -Force dist | Out-Null
           # exe.config 中有高 DPI 设置，需与 exe 放在一起
-          Compress-Archive -Path "$out/IP_UpdateTest.exe", "$out/IP_UpdateTest.exe.config" -DestinationPath "dist/$name.zip"
+          Compress-Archive -Path "$out/IPTool.exe", "$out/IPTool.exe.config" -DestinationPath "dist/$name.zip"
           Get-ChildItem dist/*.zip | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
             Set-Content dist/SHA256SUMS.txt
 

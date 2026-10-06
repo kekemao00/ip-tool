@@ -80,12 +80,12 @@ namespace IP_UpdateTest
 
         public const string Usage =
 @"用法：
-  IP_UpdateTest.exe --list [--json]
-  IP_UpdateTest.exe --diagnose [--adapter <网卡>] [--json]
-  IP_UpdateTest.exe --adapter <网卡> --static <IP>[/<前缀>] [--mask <掩码>] [--gateway <网关>] [--dns <DNS1>[,<DNS2>]]
-  IP_UpdateTest.exe --adapter <网卡> --dhcp [--dns <DNS1>[,<DNS2>]]
-  IP_UpdateTest.exe --adapter <网卡> --profile <配置方案名称>
-  IP_UpdateTest.exe --adapter <网卡> --enable | --disable
+  IPTool.exe --list [--json]
+  IPTool.exe --diagnose [--adapter <网卡>] [--json]
+  IPTool.exe --adapter <网卡> --static <IP>[/<前缀>] [--mask <掩码>] [--gateway <网关>] [--dns <DNS1>[,<DNS2>]]
+  IPTool.exe --adapter <网卡> --dhcp [--dns <DNS1>[,<DNS2>]]
+  IPTool.exe --adapter <网卡> --profile <配置方案名称>
+  IPTool.exe --adapter <网卡> --enable | --disable
 
   <网卡> 可以是连接名称（如 以太网、WLAN）、接口索引或网卡 GUID。
   --diagnose 依次检测本机网卡、路由器、外网、DNS、代理/VPN、UDP，指出问题所在环节并给出建议；

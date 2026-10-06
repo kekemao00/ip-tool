@@ -100,6 +100,42 @@ namespace IP_UpdateTest.Core
             }
         }
 
+        /// <summary>
+        /// 已开启自启动但登记的程序已不存在（如从旧版 IP_UpdateTest.exe 换成 IPTool.exe）时，改为指向当前程序
+        /// </summary>
+        public static void RefreshPath(string executablePath)
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                {
+                    string command = key?.GetValue(ValueName) as string;
+                    if (command == null) return;
+                    string registered = ParseExecutable(command);
+                    if (registered != null && File.Exists(registered)) return;
+                    key.SetValue(ValueName, $"\"{executablePath}\" {TrayArgument}");
+                }
+            }
+            catch (Exception ex) when (ex is SecurityException || ex is UnauthorizedAccessException || ex is IOException)
+            {
+            }
+        }
+
+        /// <summary>
+        /// 取 Run 项命令中的程序路径：带引号时取引号内，否则取第一个空格前
+        /// </summary>
+        internal static string ParseExecutable(string command)
+        {
+            command = command.Trim();
+            if (command.StartsWith("\""))
+            {
+                int end = command.IndexOf('"', 1);
+                return end > 1 ? command.Substring(1, end - 1) : null;
+            }
+            int space = command.IndexOf(' ');
+            return space < 0 ? command : command.Substring(0, space);
+        }
+
         public static void Set(bool enable, string executablePath)
         {
             using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RunKey))

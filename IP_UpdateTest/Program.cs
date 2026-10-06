@@ -29,6 +29,7 @@ namespace IP_UpdateTest
                     return 0;
                 }
 
+                AutoStart.RefreshPath(Application.ExecutablePath);
                 bool startInTray = args.Contains(AutoStart.TrayArgument, StringComparer.OrdinalIgnoreCase);
                 Application.Run(new FrmMain(GetArgument(args, "--adapter"), startInTray));
             }

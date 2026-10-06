@@ -49,7 +49,17 @@ jobs:
           $global:LASTEXITCODE = 0
 
       - name: 构建并运行测试
+        env:
+          # 界面冒烟测试把各窗口的截图存到这里，便于在 PR 中检查界面
+          UI_SNAPSHOT_DIR: ${{ github.workspace }}/ui-snapshots
         run: dotnet test IP_UpdateTest.sln -c Release
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ui-snapshots
+          path: ui-snapshots/
+          if-no-files-found: ignore
 
       - name: 打包
         shell: pwsh

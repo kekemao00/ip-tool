@@ -15,12 +15,16 @@
 
   <!-- 程序集信息（由 SDK 生成；ComVisible/Guid 保留在 Properties\AssemblyInfo.cs） -->
   <PropertyGroup>
-    <Version>2.1.0</Version>
+    <Version>2.2.0</Version>
     <AssemblyTitle>IP Tool</AssemblyTitle>
     <Product>IP Tool</Product>
     <Description>Windows 网络配置工具</Description>
     <Copyright>Copyright © 2016-2026</Copyright>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="IP_UpdateTest.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="System.Management" />
@@ -29,6 +33,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="app.ico" LogicalName="IP_UpdateTest.app.ico" />
+    <!-- 界面字体 Geist / Geist Mono（SIL OFL 1.1，见 Fonts\OFL.txt），运行时从资源加载 -->
+    <EmbeddedResource Include="Fonts\*.ttf" LogicalName="IP_UpdateTest.Fonts.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

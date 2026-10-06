@@ -69,7 +69,7 @@ namespace IP_UpdateTest.Ui
                 Shapes.Stroke(g, r, r.Height / 2, Palette.Fade(Palette.Line, opacity), s);
                 float icon = 14 * s;
                 Icons.Draw(g, Glyph, new RectangleF(r.X + 8 * s, r.Y + (r.Height - icon) / 2, icon, icon), Palette.Fade(GlyphColor, opacity), s, 2f);
-                Typo.Draw(g, Text, TextStyle.Small, Palette.Fade(Palette.Ink, opacity), new RectangleF(r.X + 28 * s, r.Y, r.Width - 36 * s, r.Height), s);
+                Typo.Draw(g, Text, TextStyle.Small, Palette.Fade(Palette.Ink, opacity), new RectangleF(r.X + 28 * s, r.Y, r.Width - 30 * s, r.Height), s);
             }
         }
 
@@ -196,7 +196,7 @@ namespace IP_UpdateTest.Ui
             foreach (DiagnosisLayer layer in layers)
             {
                 string name = DiagnosisReport.LayerName(layer);
-                float pw = 36 + Typo.Measure(name, TextStyle.Small, s) / s;
+                float pw = 38 + (float)Math.Ceiling(Typo.Measure(name, TextStyle.Small, s) / s);
                 if (px + pw > width - Pad && px > Pad)
                 {
                     px = Pad;

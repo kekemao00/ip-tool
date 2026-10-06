@@ -376,6 +376,38 @@ namespace IP_UpdateTest.Ui
         #region 测量与绘制
 
         /// <summary>
+        /// 一段同字体文字的宽度。首尾空格按字体的空格宽度单独计算：
+        /// GDI+ 在网格对齐时对行首、行尾空格的处理不稳定，混排时字体切换处的空格会被吃掉
+        /// </summary>
+        private static float RunWidth(Graphics g, string text, Face face, float size)
+        {
+            string body = text.Trim(' ');
+            int spaces = text.Length - body.Length;
+            float width = spaces * SpaceWidth(face, size);
+            if (body.Length > 0) width += g.MeasureString(body, GetFont(face, size), PointF.Empty, Format).Width;
+            return width;
+        }
+
+        private static readonly Dictionary<Face, float> SpaceEm = new Dictionary<Face, float>();
+
+        /// <summary>
+        /// 空格宽度：在 100px 下量“x x”与“xx”的差，避免小字号的网格取整
+        /// </summary>
+        private static float SpaceWidth(Face face, float size)
+        {
+            float em;
+            if (!SpaceEm.TryGetValue(face, out em))
+            {
+                Font big = GetFont(face, 100);
+                em = (MeasureGraphics.MeasureString("x x", big, PointF.Empty, Format).Width
+                    - MeasureGraphics.MeasureString("xx", big, PointF.Empty, Format).Width) / 100f;
+                if (em <= 0.05f || em > 0.6f) em = 0.27f;
+                SpaceEm[face] = em;
+            }
+            return em * size;
+        }
+
+        /// <summary>
         /// 一行文字的宽度（设备像素）
         /// </summary>
         public static float Measure(string text, TextStyle style, float scale)
@@ -388,7 +420,7 @@ namespace IP_UpdateTest.Ui
             float size = SizeOf(style) * scale;
             width = 0;
             foreach (Run run in Split(text, style))
-                width += MeasureGraphics.MeasureString(run.Text, GetFont(run.Face, size), PointF.Empty, Format).Width;
+                width += RunWidth(MeasureGraphics, run.Text, run.Face, size);
 
             if (WidthCache.Count > 4000) WidthCache.Clear();
             WidthCache[key] = width;
@@ -407,8 +439,11 @@ namespace IP_UpdateTest.Ui
                 foreach (Run run in Split(text, style))
                 {
                     Font font = GetFont(run.Face, size);
-                    g.DrawString(run.Text, font, brush, x, baseline - Ascent(font), Format);
-                    x += g.MeasureString(run.Text, font, PointF.Empty, Format).Width;
+                    string body = run.Text.Trim(' ');
+                    float space = SpaceWidth(run.Face, size);
+                    float lead = (run.Text.Length - run.Text.TrimStart(' ').Length) * space;
+                    if (body.Length > 0) g.DrawString(body, font, brush, x + lead, baseline - Ascent(font), Format);
+                    x += RunWidth(g, run.Text, run.Face, size);
                 }
             }
         }

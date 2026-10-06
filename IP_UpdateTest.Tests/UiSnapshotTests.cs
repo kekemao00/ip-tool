@@ -50,6 +50,8 @@ namespace IP_UpdateTest.Tests
         {
             RunOnSta(() =>
             {
+                // 与 Program.Main 一致；输入框的占位提示需要新版控件库
+                Application.EnableVisualStyles();
                 Motion.Freeze(clock);
                 ProfileManager.Add(new IpProfile { Name = "公司", IsDhcp = false, IpAddress = "10.20.30.40", SubnetMask = "255.255.255.0", Gateway = "10.20.30.1", ManualDns = true, DnsMain = "223.5.5.5", DnsBackup = "119.29.29.29" });
                 ProfileManager.Add(new IpProfile { Name = "家里", IsDhcp = true, ManualDns = false });

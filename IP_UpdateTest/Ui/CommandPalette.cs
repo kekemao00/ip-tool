@@ -133,6 +133,7 @@ namespace IP_UpdateTest.Ui
             private readonly SpringValue highlightY = new SpringValue(0, Spring.Default);
             private int highlight = -1;
             private double changedAt = double.NegativeInfinity;
+            private Point lastMouse = Cursor.Position;
 
             private sealed class Entry
             {
@@ -230,6 +231,10 @@ namespace IP_UpdateTest.Ui
             protected override void OnMouseMove(MouseEventArgs e)
             {
                 base.OnMouseMove(e);
+                // 面板在静止的鼠标下打开时系统也会发一次移动消息，鼠标真正移动了才跟随
+                Point screen = Cursor.Position;
+                if (screen == lastMouse) return;
+                lastMouse = screen;
                 int i = EntryAt(e.Location);
                 if (i >= 0) SetHighlight(i);
             }

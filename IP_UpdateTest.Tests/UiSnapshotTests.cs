@@ -57,6 +57,14 @@ namespace IP_UpdateTest.Tests
                 ProfileManager.Add(new IpProfile { Name = "家里", IsDhcp = true, ManualDns = false });
                 ProfileManager.Add(new IpProfile { Name = "实验室", IsDhcp = false, IpAddress = "192.168.8.20", SubnetMask = "255.255.255.0", Gateway = "192.168.8.1", ManualDns = true, DnsMain = "192.168.8.1", AdapterMac = "00-15-5D-01-02-03" });
 
+                if (!string.IsNullOrEmpty(outputDirectory))
+                {
+                    // 临时：记录混排测量结果
+                    var lines = new List<string> { "HasGeist=" + Typo.HasGeist + " Cjk=" + Typo.CjkFamilyName };
+                    foreach (string t in new[] { "1", " ", "1 ", " 1", "平", " 平", "平 ", "1 平", "1平", "192.168.1.1 平均 2 ms", "192.168.1.1平均 2 ms" })
+                        lines.Add("[" + t + "] " + Typo.Measure(t, TextStyle.Body, 1f).ToString("0.00"));
+                    File.WriteAllLines(Path.Combine(outputDirectory, "metrics.txt"), lines);
+                }
                 List<NetworkAdapter> adapters = SampleAdapters();
                 RenderMain(adapters);
                 RenderProfiles(adapters);

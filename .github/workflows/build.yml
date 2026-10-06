@@ -66,6 +66,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          Get-Content ui-snapshots/metrics.txt -ErrorAction SilentlyContinue | ForEach-Object { "METRIC $_" }
           Get-ChildItem ui-snapshots/*.png -ErrorAction SilentlyContinue | ForEach-Object {
             "SNAP-BEGIN $($_.Name)"
             $b = [Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName))

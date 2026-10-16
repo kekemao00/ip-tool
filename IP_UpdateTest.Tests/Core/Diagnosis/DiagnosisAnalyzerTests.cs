@@ -392,6 +392,22 @@ namespace IP_UpdateTest.Tests.Core.Diagnosis
         }
 
         [Fact]
+        public void SystemProxyWithoutEnvironment_PointsToTerminalProxy()
+        {
+            DiagnosisFacts f = Healthy();
+            f.SystemProxyEnabled = true;
+            f.Proxies.Add(new ProxyFact { Source = "系统代理", Value = "127.0.0.1:10809", Endpoint = "127.0.0.1:10809", Reachable = true });
+            f.HttpViaProxy = Ok();
+
+            DiagnosisCheck check = Check(Analyze(f), "命令行代理");
+            Assert.Equal(CheckStatus.Info, check.Status);
+            Assert.Contains(check.Suggestions, s => s.Contains("终端代理"));
+
+            f.Proxies.Add(new ProxyFact { Source = "环境变量 HTTPS_PROXY", Value = "http://127.0.0.1:10809", Endpoint = "127.0.0.1:10809", Reachable = true });
+            Assert.DoesNotContain(Analyze(f).Checks, c => c.Title == "命令行代理");
+        }
+
+        [Fact]
         public void StaleWinHttpProxy_Warns()
         {
             DiagnosisFacts f = Healthy();

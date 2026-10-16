@@ -181,6 +181,7 @@ namespace IP_UpdateTest
             btnProfile.Click += btnProfile_Click;
             btnDiagnose.Click += btnDiagnose_Click;
             btnReport.Click += btnReport_Click;
+            btnTerminalProxy.Click += btnTerminalProxy_Click;
             btnRevert.Click += btnRevert_Click;
             btnApply.Click += btnApply_Click;
 
@@ -211,6 +212,7 @@ namespace IP_UpdateTest
             tips.SetToolTip(btnDnsBenchmark, "测试各公共 DNS 的响应速度并选择");
             tips.SetToolTip(btnDiagnose, "分层检测网络：网卡、路由器、外网、DNS、代理 / VPN、UDP");
             tips.SetToolTip(btnReport, "网卡信息报表，可复制或导出");
+            tips.SetToolTip(btnTerminalProxy, "检查并一键设置命令行（cmd、PowerShell、git、curl）的代理");
             tips.SetToolTip(btnRevert, "恢复为网卡当前的配置（Esc）");
             tips.SetToolTip(btnApply, "把以上配置应用到所选网卡（Enter）");
         }
@@ -229,6 +231,7 @@ namespace IP_UpdateTest
             }
             CreateTrayIcon();
             chkShowAll.Checked = settings.ShowAllAdapters;
+            SetFollowSystemProxy(settings.FollowSystemProxy);
             isInitializing = false;
 
             NetworkChange.NetworkAddressChanged += NetworkChange_NetworkAddressChanged;
@@ -267,6 +270,7 @@ namespace IP_UpdateTest
             NetworkChange.NetworkAddressChanged -= NetworkChange_NetworkAddressChanged;
             NetworkChange.NetworkAvailabilityChanged -= NetworkChange_NetworkAvailabilityChanged;
             refreshTimer.Dispose();
+            SetFollowSystemProxy(false);
             if (trayIcon != null)
             {
                 // 不先隐藏的话，退出后托盘里会残留图标直到鼠标划过
@@ -1262,6 +1266,7 @@ namespace IP_UpdateTest
             const string tools = "工具";
             list.Add(new PaletteCommand(tools, "网络诊断", Glyph.Activity, () => btnDiagnose.PerformClick()) { Keywords = "诊断 检测 上不了网 diagnose" });
             list.Add(new PaletteCommand(tools, "网卡信息报表", Glyph.FileText, () => btnReport.PerformClick()) { Keywords = "报表 report 导出" });
+            list.Add(new PaletteCommand(tools, "终端代理（cmd、PowerShell、git）", Glyph.Terminal, OpenTerminalProxy) { Keywords = "proxy 代理 命令行 终端 v2ray clash git pip npm curl 环境变量" });
             list.Add(new PaletteCommand(tools, "打开系统“网络连接”", Glyph.ExternalLink, OpenNetworkConnections) { Keywords = "ncpa" });
 
             const string adapterGroup = "网卡";

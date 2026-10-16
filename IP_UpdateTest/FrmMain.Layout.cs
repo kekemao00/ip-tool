@@ -61,6 +61,7 @@ namespace IP_UpdateTest
         private readonly SpringButton btnProfile = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Layers, Text = "配置方案", ShowChevron = true };
         private readonly SpringButton btnDiagnose = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Activity, Text = "诊断" };
         private readonly SpringButton btnReport = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.FileText, Text = "报表" };
+        private readonly SpringButton btnTerminalProxy = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Terminal, Text = "终端代理" };
         private readonly SpringButton btnRevert = new SpringButton { Kind = ButtonKind.Ghost, Glyph = Glyph.Undo, Text = "还原" };
         private readonly SpringButton btnApply = new SpringButton { Kind = ButtonKind.Primary, Text = "应用" };
         private readonly InkLabel lblStatus = new InkLabel { Style = TextStyle.Small, TextColor = Palette.Ink3 };
@@ -106,7 +107,7 @@ namespace IP_UpdateTest
                 lblIpMode, segIpMode, lblIpAddress, txtIpAddress, lblMask, txtMask, lblGateway, txtGateway, ruleConfig,
                 lblDnsMode, segDnsMode, btnDnsPreset, btnDnsBenchmark, lblDnsMain, txtDnsMain, lblDnsBackup, txtDnsBackup
             });
-            Controls.AddRange(new Control[] { pnlElevation, pnlAdapter, pnlConfig, btnProfile, btnDiagnose, btnReport, btnRevert, btnApply, lblStatus });
+            Controls.AddRange(new Control[] { pnlElevation, pnlAdapter, pnlConfig, btnProfile, btnDiagnose, btnReport, btnTerminalProxy, btnRevert, btnApply, lblStatus });
 
             // Tab 顺序：网卡 → 配置 → 操作
             int tab = 0;
@@ -120,8 +121,9 @@ namespace IP_UpdateTest
             btnProfile.TabIndex = 3;
             btnDiagnose.TabIndex = 4;
             btnReport.TabIndex = 5;
-            btnRevert.TabIndex = 6;
-            btnApply.TabIndex = 7;
+            btnTerminalProxy.TabIndex = 6;
+            btnRevert.TabIndex = 7;
+            btnApply.TabIndex = 8;
 
             AcceptButton = btnApply;
             CancelButton = btnRevert;
@@ -166,7 +168,7 @@ namespace IP_UpdateTest
 
             float actionsY = top + CardHeight + 16;
             float x = gutter;
-            foreach (SpringButton b in new[] { btnProfile, btnDiagnose, btnReport })
+            foreach (SpringButton b in new[] { btnProfile, btnDiagnose, btnReport, btnTerminalProxy })
             {
                 int w = b.PreferredWidth;
                 b.SetBounds(P(x), P(actionsY + 2), w, P(40));

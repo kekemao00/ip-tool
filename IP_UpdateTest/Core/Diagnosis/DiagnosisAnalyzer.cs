@@ -459,6 +459,11 @@ namespace IP_UpdateTest.Core.Diagnosis
                     checks.Add(new DiagnosisCheck(L, "代理效果", CheckStatus.Ok, $"经系统代理访问正常（{f.HttpViaProxy.Milliseconds} ms）"));
             }
 
+            // v2rayN、Clash 等只设置系统代理，命令行工具只认环境变量
+            if (f.SystemProxyEnabled && proxyReachable && !f.Proxies.Any(p => p.Source.StartsWith("环境变量", StringComparison.Ordinal)))
+                checks.Add(new DiagnosisCheck(L, "命令行代理", CheckStatus.Info, "系统代理只对浏览器等程序生效，cmd、PowerShell、git、curl 不会走代理",
+                    "需要时在主窗口点“终端代理”一键设置"));
+
             if (f.VpnAdapters.Count > 0)
                 checks.Add(new DiagnosisCheck(L, "VPN / 隧道网卡", CheckStatus.Info, string.Join("、", f.VpnAdapters)));
             if (f.RouteViaVpn)

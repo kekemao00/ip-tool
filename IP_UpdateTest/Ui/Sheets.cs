@@ -221,7 +221,9 @@ namespace IP_UpdateTest.Ui
             {
                 using (Graphics g = Graphics.FromImage(snapshot))
                 {
-                    Color behind = SampleBehind(snapshot, originRect);
+                    // 顶栏里的控件（如更新胶囊）旁边可能正好是通知胶囊，直接用顶栏的底色
+                    bool inTitleBar = form.TitleBar != null && originRect.Bottom <= form.TitleBar.Bottom;
+                    Color behind = inTitleBar ? Palette.Canvas : SampleBehind(snapshot, originRect);
                     using (var brush = new SolidBrush(behind))
                         g.FillRectangle(brush, Rectangle.Inflate(originRect, 1, 1));
                 }
@@ -252,17 +254,6 @@ namespace IP_UpdateTest.Ui
         /// </summary>
         public static Task<object> Show(ThemedForm form, SheetContent content, Control origin)
         {
-            // 前一个面板正在收起时直接结束它，避免被截进新画面
-            foreach (Control c in form.Controls)
-            {
-                var overlay = c as SheetOverlay;
-                if (overlay != null && overlay.IsClosing)
-                {
-                    overlay.Finish();
-                    break;
-                }
-            }
-
             Rectangle rect = Rectangle.Empty;
             Color color = Palette.Surface;
             float radius = Metrics.ButtonRadius * form.DeviceDpi / 96f;
@@ -295,6 +286,17 @@ namespace IP_UpdateTest.Ui
         /// </summary>
         public static Task<object> Show(ThemedForm form, SheetContent content, Rectangle originRect, Color originColor, float originRadius)
         {
+            // 前一个面板正在收起时直接结束它，避免被截进新画面
+            foreach (Control c in form.Controls)
+            {
+                var closing = c as SheetOverlay;
+                if (closing != null && closing.IsClosing)
+                {
+                    closing.Finish();
+                    break;
+                }
+            }
+
             var overlay = new SheetOverlay(form, content, originRect, originColor, originRadius);
             overlay.Open();
             return overlay.Task;

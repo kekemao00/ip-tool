@@ -36,6 +36,7 @@ namespace IP_UpdateTest
         private readonly Crossfade<Glyph> badge = new Crossfade<Glyph>(Glyph.ArrowUp);
         private readonly Crossfade<string> heading = new Crossfade<string>("");
         private UpdateState shown = (UpdateState)(-1);
+        private ReleaseInfo notesFor;
 
         public UpdateSheet(UpdateManager manager, Action skip, Func<Task> install, Action openPage)
         {
@@ -54,7 +55,8 @@ namespace IP_UpdateTest
             foreach (Control c in new Control[] { btnPrimary, btnSecondary, btnLeft, btnPage }) c.TabIndex = tab++;
             Accept = btnPrimary;
 
-            notes.SetNotes(ReleaseNotes.Parse(manager.Release == null ? "" : manager.Release.Notes));
+            notesFor = manager.Release;
+            notes.SetNotes(ReleaseNotes.Parse(notesFor == null ? "" : notesFor.Notes));
             manager.Changed += Sync;
             Sync();
         }
@@ -83,6 +85,13 @@ namespace IP_UpdateTest
             UpdateState state = manager.State;
             double now = Motion.Now;
             bool animate = IsHandleCreated && !Motion.IsFrozen;
+
+            // 面板开着时后台查到了更新的版本：换成新版本的更新内容
+            if (manager.Release != null && manager.Release != notesFor)
+            {
+                notesFor = manager.Release;
+                notes.SetNotes(ReleaseNotes.Parse(notesFor.Notes));
+            }
 
             double fraction = state == UpdateState.Downloading ? manager.Progress.Fraction
                 : state == UpdateState.Verifying || state == UpdateState.Ready || state == UpdateState.Installing ? 1

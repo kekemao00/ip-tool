@@ -61,8 +61,16 @@ namespace IP_UpdateTest.Core.Update
 
         private static readonly Lazy<HttpClient> Http = new Lazy<HttpClient>(() =>
         {
-            // 使用系统代理设置（与浏览器一致）
-            var client = new HttpClient(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate })
+            // 使用系统代理设置（与浏览器一致），需要身份验证的公司代理用当前 Windows 账户登录
+            IWebProxy proxy = WebRequest.GetSystemWebProxy();
+            proxy.Credentials = CredentialCache.DefaultCredentials;
+            var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+                Proxy = proxy,
+                UseProxy = true
+            };
+            var client = new HttpClient(handler)
             {
                 Timeout = System.Threading.Timeout.InfiniteTimeSpan
             };
@@ -90,6 +98,7 @@ namespace IP_UpdateTest.Core.Update
                     using (HttpResponseMessage response = await Http.Value.SendAsync(request, timeout.Token).ConfigureAwait(false))
                     {
                         if (response.StatusCode == HttpStatusCode.NotFound) throw new UpdateException("还没有发布过正式版本");
+                        if (response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired) throw new UpdateException("代理服务器要求身份验证，请检查代理设置");
                         if (response.StatusCode == HttpStatusCode.Forbidden || (int)response.StatusCode == 429)
                             throw new UpdateException("GitHub 访问次数已达上限，请稍后再试");
                         if (!response.IsSuccessStatusCode) throw new UpdateException("GitHub 返回 " + (int)response.StatusCode);
@@ -215,54 +224,95 @@ namespace IP_UpdateTest.Core.Update
         private static async Task DownloadFileAsync(string url, string path, long expectedSize, IProgress<DownloadProgress> progress, CancellationToken cancel)
         {
             string part = path + ".part";
-            using (var stall = CancellationTokenSource.CreateLinkedTokenSource(cancel))
+            HttpResponseMessage response;
+            using (var headers = CancellationTokenSource.CreateLinkedTokenSource(cancel))
             {
-                stall.CancelAfter(StallTimeout);
-                using (HttpResponseMessage response = await Http.Value.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, stall.Token).ConfigureAwait(false))
-                {
-                    if (!response.IsSuccessStatusCode) throw new UpdateException("下载安装包失败（" + (int)response.StatusCode + "）");
-                    long total = response.Content.Headers.ContentLength ?? expectedSize;
-                    using (Stream input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-                    using (var output = new FileStream(part, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
-                    {
-                        var buffer = new byte[81920];
-                        long received = 0;
-                        var watch = Stopwatch.StartNew();
-                        long lastReport = -1000;
-                        double speed = 0;
-                        long windowBytes = 0;
-                        long windowStart = 0;
-                        while (true)
-                        {
-                            stall.CancelAfter(StallTimeout);
-                            int read = await input.ReadAsync(buffer, 0, buffer.Length, stall.Token).ConfigureAwait(false);
-                            if (read == 0) break;
-                            await output.WriteAsync(buffer, 0, read, stall.Token).ConfigureAwait(false);
-                            received += read;
-                            windowBytes += read;
+                headers.CancelAfter(StallTimeout);
+                response = await Http.Value.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, headers.Token).ConfigureAwait(false);
+            }
 
-                            long now = watch.ElapsedMilliseconds;
-                            if (now - windowStart >= 400)
-                            {
-                                // 速度做指数平滑，避免数字跳动
-                                double instant = windowBytes * 1000.0 / Math.Max(1, now - windowStart);
-                                speed = speed <= 0 ? instant : speed * 0.6 + instant * 0.4;
-                                windowBytes = 0;
-                                windowStart = now;
-                            }
-                            if (progress != null && now - lastReport >= 80)
-                            {
-                                lastReport = now;
-                                progress.Report(new DownloadProgress(received, total, speed));
-                            }
+            bool abandoned = false;
+            try
+            {
+                if (!response.IsSuccessStatusCode) throw new UpdateException("下载安装包失败（" + (int)response.StatusCode + "）");
+                long total = response.Content.Headers.ContentLength ?? expectedSize;
+                Stream input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                using (var output = new FileStream(part, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
+                {
+                    var buffer = new byte[81920];
+                    long received = 0;
+                    var watch = Stopwatch.StartNew();
+                    long lastReport = -1000;
+                    double speed = 0;
+                    long windowBytes = 0;
+                    long windowStart = 0;
+                    while (true)
+                    {
+                        int read;
+                        try
+                        {
+                            read = await ReadWithWatchdogAsync(input, buffer, cancel).ConfigureAwait(false);
                         }
-                        if (total > 0 && received != total) throw new UpdateException("下载不完整，请重试");
-                        if (progress != null) progress.Report(new DownloadProgress(received, Math.Max(total, received), speed));
+                        catch (OperationCanceledException)
+                        {
+                            abandoned = true;
+                            throw;
+                        }
+                        if (read == 0) break;
+                        await output.WriteAsync(buffer, 0, read, cancel).ConfigureAwait(false);
+                        received += read;
+                        windowBytes += read;
+
+                        long now = watch.ElapsedMilliseconds;
+                        if (now - windowStart >= 400)
+                        {
+                            // 速度做指数平滑，避免数字跳动
+                            double instant = windowBytes * 1000.0 / Math.Max(1, now - windowStart);
+                            speed = speed <= 0 ? instant : speed * 0.6 + instant * 0.4;
+                            windowBytes = 0;
+                            windowStart = now;
+                        }
+                        if (progress != null && now - lastReport >= 80)
+                        {
+                            lastReport = now;
+                            progress.Report(new DownloadProgress(received, total, speed));
+                        }
                     }
+                    if (total > 0 && received != total) throw new UpdateException("下载不完整，请重试");
+                    if (progress != null) progress.Report(new DownloadProgress(received, Math.Max(total, received), speed));
                 }
+            }
+            finally
+            {
+                // 放弃的连接可能还卡在读取上，关闭它也可能等很久：放到后台去关，.part 文件已经在上面关掉了
+                if (abandoned) _ = Task.Run(() => response.Dispose());
+                else response.Dispose();
             }
             if (File.Exists(path)) File.Delete(path);
             File.Move(part, path);
+        }
+
+        /// <summary>
+        /// .NET Framework 的响应流在读的过程中不理会取消令牌，网络断开（没有 RST）时会一直等下去。
+        /// 这里用计时器兜底：超时或用户取消时放弃这次读取，抛出 OperationCanceledException
+        /// </summary>
+        private static async Task<int> ReadWithWatchdogAsync(Stream input, byte[] buffer, CancellationToken cancel)
+        {
+            cancel.ThrowIfCancellationRequested();
+            Task<int> read = input.ReadAsync(buffer, 0, buffer.Length, cancel);
+            using (var timer = CancellationTokenSource.CreateLinkedTokenSource(cancel))
+            {
+                Task first = await Task.WhenAny(read, Task.Delay(StallTimeout, timer.Token)).ConfigureAwait(false);
+                if (first == read)
+                {
+                    timer.Cancel();
+                    return await read.ConfigureAwait(false);
+                }
+            }
+            // 放弃的读取在连接关闭后会以异常结束，这里接住，避免未观察的任务异常
+            _ = read.ContinueWith(t => { var ignored = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            cancel.ThrowIfCancellationRequested();
+            throw new OperationCanceledException();
         }
 
         internal static string HashFile(string path)

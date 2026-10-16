@@ -58,6 +58,11 @@ namespace IP_UpdateTest.Ui
         public event Action Changed;
 
         /// <summary>
+        /// 胶囊右边不越过的位置（设备像素）。标题栏有更新胶囊时设为它的左边，通知往左让开，不盖住它
+        /// </summary>
+        public float RightLimit { get; set; } = float.MaxValue;
+
+        /// <summary>
         /// 显示一条通知。maxWidth 为宿主可用宽度（逻辑像素）
         /// </summary>
         public void Notify(NoticeKind kind, string text, float maxWidth)
@@ -146,7 +151,9 @@ namespace IP_UpdateTest.Ui
         {
             float w = (float)width.ValueAt(now) * scale, h = (float)height.ValueAt(now) * scale;
             float cy = (Top + Height / 2) * scale;
-            return new RectangleF(hostWidth / 2 - w / 2, cy - h / 2, w, h);
+            float cx = hostWidth / 2;
+            if (cx + w / 2 > RightLimit) cx = Math.Max(w / 2 + 8 * scale, RightLimit - w / 2);
+            return new RectangleF(cx - w / 2, cy - h / 2, w, h);
         }
 
         public void Paint(Graphics g, float hostWidth, float scale, double now)
@@ -358,6 +365,14 @@ namespace IP_UpdateTest.Ui
                 LayoutButtons();
                 return update.Visible ? Rectangle.Round(update.Bounds) : Rectangle.Empty;
             }
+        }
+
+        /// <summary>
+        /// 更新胶囊当前的底色，面板从胶囊展开时从这个颜色过渡
+        /// </summary>
+        public Color UpdateBadgeColor
+        {
+            get { return updatePaintedKind == UpdateBadgeKind.Failed ? Palette.DangerSoft : Palette.AccentSoft; }
         }
 
         public bool ShowSearch
@@ -585,6 +600,8 @@ namespace IP_UpdateTest.Ui
                     Palette.Mix(Palette.Ink2, Palette.Ink, hover), s);
             }
 
+            // 有更新胶囊时通知往左让开（跟着胶囊宽度的弹簧一起移动）
+            Island.RightLimit = update.Bounds.Width > 0.5f ? update.Bounds.Left - Px(8) : float.MaxValue;
             Island.Paint(g, Width, s, now);
         }
 

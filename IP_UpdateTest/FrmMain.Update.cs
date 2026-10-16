@@ -46,6 +46,11 @@ namespace IP_UpdateTest
         private bool startupUpdateCheckDone;
 
         /// <summary>
+        /// 后台检查进行中时用户手动检查了：结果按手动检查显示
+        /// </summary>
+        private bool manualCheckRequested;
+
+        /// <summary>
         /// 从旧版本更新后首次启动时，为更新前的版本号（--updated-from）
         /// </summary>
         internal string UpdatedFrom { get; set; }
@@ -79,7 +84,8 @@ namespace IP_UpdateTest
         private void StartUpdateChecks()
         {
             // 上次更新留下的 IPTool.exe.old 等
-            UpdateInstaller.CleanupBackups(Path.GetDirectoryName(Application.ExecutablePath));
+            string executable = Application.ExecutablePath;
+            UpdateInstaller.CleanupBackups(Path.GetDirectoryName(executable), Path.GetFileName(executable));
             updateTimer.Interval = FirstUpdateCheckDelay;
             updateTimer.Start();
         }
@@ -113,25 +119,31 @@ namespace IP_UpdateTest
         }
 
         /// <summary>
-        /// 检查更新。手动检查时显示结果，有新版本直接打开更新面板；自动检查只在发现新版本时轻轻提示
+        /// 检查更新。手动检查时显示结果，有新版本直接打开更新面板；自动检查只在发现新版本时轻轻提示。
+        /// 已有新版本但还没下载时也会重新查询，期间可能又发布了更新的版本
         /// </summary>
         private async Task CheckForUpdatesAsync(bool manual)
         {
             if (manual)
             {
-                if (updates.HasUpdate)
+                ShowWindowIfHidden();
+                // 正在下载、已就绪或失败：直接打开面板
+                if (updates.HasUpdate && updates.State != UpdateState.Available)
                 {
-                    updateBadgeSuppressed = false;
-                    OnUpdateChanged();
                     OpenUpdateSheet();
                     return;
                 }
-                if (updates.State == UpdateState.Checking) return;
                 Notify(NoticeKind.Info, "正在检查更新…");
+                if (updates.IsChecking)
+                {
+                    manualCheckRequested = true;
+                    return;
+                }
             }
             else
             {
-                if (settings.UpdateCheckDisabled || updates.IsBusy || updates.HasUpdate) return;
+                if (settings.UpdateCheckDisabled || updates.IsBusy || HasSheet
+                    || (updates.HasUpdate && updates.State != UpdateState.Available)) return;
                 bool due = !startupUpdateCheckDone || !settings.LastUpdateCheck.HasValue
                     || DateTime.Now - settings.LastUpdateCheck.Value >= UpdateCheckInterval;
                 if (!due) return;
@@ -145,9 +157,16 @@ namespace IP_UpdateTest
             }
             catch (UpdateException ex)
             {
-                if (manual && !IsDisposed) Notify(NoticeKind.Error, "检查更新失败：" + ex.Message);
+                manual |= manualCheckRequested;
+                manualCheckRequested = false;
+                if (!manual || IsDisposed) return;
+                // 重新查询失败但已知有新版本：照样打开面板
+                if (updates.HasUpdate) ShowUpdateFound(updates.Release);
+                else Notify(NoticeKind.Error, "检查更新失败：" + ex.Message);
                 return;
             }
+            manual |= manualCheckRequested;
+            manualCheckRequested = false;
             if (IsDisposed) return;
             settings.LastUpdateCheck = DateTime.Now;
             SaveSettings();
@@ -159,9 +178,7 @@ namespace IP_UpdateTest
             }
             if (manual)
             {
-                updateBadgeSuppressed = false;
-                OnUpdateChanged();
-                OpenUpdateSheet();
+                ShowUpdateFound(release);
                 return;
             }
             updateBadgeSuppressed = string.Equals(release.Tag, settings.SkippedVersion, StringComparison.OrdinalIgnoreCase);
@@ -169,8 +186,23 @@ namespace IP_UpdateTest
             if (!updateBadgeSuppressed && notifiedUpdateTag != release.Tag && Visible && !HasSheet)
             {
                 notifiedUpdateTag = release.Tag;
-                Notify(NoticeKind.Info, "发现新版本 " + release.DisplayVersion + "，点右上角查看");
+                Notify(NoticeKind.Info, "发现新版本 " + release.DisplayVersion);
             }
+        }
+
+        /// <summary>
+        /// 手动检查到新版本：用户主动来看，跳过过的版本也重新显示，打开更新面板
+        /// </summary>
+        private void ShowUpdateFound(ReleaseInfo release)
+        {
+            if (string.Equals(release.Tag, settings.SkippedVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                settings.SkippedVersion = null;
+                SaveSettings();
+            }
+            updateBadgeSuppressed = false;
+            OnUpdateChanged();
+            OpenUpdateSheet();
         }
 
         /// <summary>
@@ -220,7 +252,7 @@ namespace IP_UpdateTest
             if (state != lastUpdateState && Visible && !HasSheet)
             {
                 if (state == UpdateState.Ready && (lastUpdateState == UpdateState.Verifying || lastUpdateState == UpdateState.Downloading))
-                    Notify(NoticeKind.Success, version + " 已下载好，点右上角重启更新");
+                    Notify(NoticeKind.Success, version + " 已下载好，可以重启更新");
                 else if (state == UpdateState.Failed && lastUpdateState != UpdateState.Installing)
                     Notify(NoticeKind.Error, updates.Error);
             }
@@ -232,12 +264,13 @@ namespace IP_UpdateTest
         /// </summary>
         internal async void OpenUpdateSheet()
         {
-            if (HasSheet || !updates.HasUpdate) return;
-            if (!Visible || WindowState == FormWindowState.Minimized) ShowFromTray();
+            if (!updates.HasUpdate) return;
+            ShowWindowIfHidden();
+            if (HasSheet) return;
             var sheet = new UpdateSheet(updates, SkipUpdate, InstallUpdateAsync, OpenReleasePage);
             System.Drawing.Rectangle origin = TitleBar.UpdateBadgeBounds;
             if (origin.IsEmpty) await SheetOverlay.Show(this, sheet, null);
-            else await SheetOverlay.Show(this, sheet, origin, Palette.AccentSoft, origin.Height / 2f);
+            else await SheetOverlay.Show(this, sheet, origin, TitleBar.UpdateBadgeColor, origin.Height / 2f);
         }
 
         private void SkipUpdate()
@@ -272,6 +305,7 @@ namespace IP_UpdateTest
             if (updates.State != UpdateState.Ready) return;
             if (isBusy)
             {
+                ShowWindowIfHidden();
                 Notify(NoticeKind.Warning, "正在修改网络配置，完成后再更新");
                 return;
             }
@@ -286,12 +320,14 @@ namespace IP_UpdateTest
             catch (UpdateException ex)
             {
                 PendingEdit.Clear();
+                ShowWindowIfHidden();
                 if (!HasSheet) Notify(NoticeKind.Error, ex.Message);
                 return;
             }
             if (!installed)
             {
                 PendingEdit.Clear();
+                ShowWindowIfHidden();
                 Notify(NoticeKind.Info, "程序在受保护的文件夹中，需要管理员权限才能更新");
                 return;
             }
@@ -308,6 +344,14 @@ namespace IP_UpdateTest
             ExitApplication();
         }
 
+        /// <summary>
+        /// 从托盘菜单操作时窗口可能藏着：先拿出来，结果和原因才看得到
+        /// </summary>
+        private void ShowWindowIfHidden()
+        {
+            if (!IsDisposed && (!Visible || WindowState == FormWindowState.Minimized)) ShowFromTray();
+        }
+
         private ToolStripMenuItem UpdateMenuItem()
         {
             ReleaseInfo release = updates.Release;
@@ -315,9 +359,7 @@ namespace IP_UpdateTest
                 return Menus.Item("重启并更新到 " + release.DisplayVersion, Glyph.ArrowUpCircle, async (s, e) => await InstallUpdateAsync());
             if (updates.HasUpdate)
                 return Menus.Item("更新到 " + release.DisplayVersion + "…", Glyph.ArrowUpCircle, async (s, e) => await CheckForUpdatesAsync(true));
-            ToolStripMenuItem item = Menus.Item("检查更新", Versions.Display(updates.CurrentVersion), Glyph.ArrowUpCircle, async (s, e) => await CheckForUpdatesAsync(true));
-            item.Enabled = updates.State != UpdateState.Checking;
-            return item;
+            return Menus.Item("检查更新", Versions.Display(updates.CurrentVersion), Glyph.ArrowUpCircle, async (s, e) => await CheckForUpdatesAsync(true));
         }
 
         private ToolStripMenuItem AutoUpdateMenuItem()

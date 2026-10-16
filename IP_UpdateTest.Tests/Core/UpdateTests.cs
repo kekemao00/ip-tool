@@ -168,12 +168,51 @@ namespace IP_UpdateTest.Tests.Core
             File.WriteAllText(Path.Combine(source, "IPTool.exe"), "new");
             File.WriteAllText(Path.Combine(source, "IPTool.exe.config"), "config");
 
-            UpdateInstaller.Install(source, target);
+            UpdateInstaller.Install(source, target, "IPTool.exe");
 
             Assert.Equal("new", File.ReadAllText(Path.Combine(target, "IPTool.exe")));
             Assert.Equal("config", File.ReadAllText(Path.Combine(target, "IPTool.exe.config")));
             Assert.Equal("old", File.ReadAllText(Path.Combine(target, "IPTool.exe.old")));
             Assert.Equal("user data", File.ReadAllText(Path.Combine(target, "profiles.json")));
+        }
+
+        [Fact]
+        public void Install_KeepsRenamedProgramName()
+        {
+            File.WriteAllText(Path.Combine(target, "NetTool.exe"), "old");
+            File.WriteAllText(Path.Combine(target, "NetTool.exe.config"), "old config");
+            File.WriteAllText(Path.Combine(source, "IPTool.exe"), "new");
+            File.WriteAllText(Path.Combine(source, "IPTool.exe.config"), "config");
+
+            UpdateInstaller.Install(source, target, "NetTool.exe");
+
+            Assert.Equal("new", File.ReadAllText(Path.Combine(target, "NetTool.exe")));
+            Assert.Equal("config", File.ReadAllText(Path.Combine(target, "NetTool.exe.config")));
+            Assert.Equal("old", File.ReadAllText(Path.Combine(target, "NetTool.exe.old")));
+            Assert.False(File.Exists(Path.Combine(target, "IPTool.exe")));
+        }
+
+        [Fact]
+        public void RunFromCommandLine_RequiresProgramInTarget()
+        {
+            File.WriteAllText(Path.Combine(source, "IPTool.exe"), "new");
+            string elsewhere = Path.Combine(root, "elsewhere");
+            Directory.CreateDirectory(elsewhere);
+
+            Assert.NotEqual(0, UpdateInstaller.RunFromCommandLine(new[] { UpdateInstaller.InstallArgument, source, elsewhere, "IPTool.exe" }));
+            Assert.Empty(Directory.GetFiles(elsewhere));
+
+            File.WriteAllText(Path.Combine(target, "IPTool.exe"), "old");
+            Assert.Equal(0, UpdateInstaller.RunFromCommandLine(new[] { UpdateInstaller.InstallArgument, source, target, "IPTool.exe" }));
+            Assert.Equal("new", File.ReadAllText(Path.Combine(target, "IPTool.exe")));
+        }
+
+        [Theory]
+        [InlineData(@"C:\Program Files\IP Tool", "\"C:\\Program Files\\IP Tool\"")]
+        [InlineData(@"D:\", "\"D:\\\\\"")]
+        public void Quote_DoublesTrailingBackslash(string value, string expected)
+        {
+            Assert.Equal(expected, UpdateInstaller.Quote(value));
         }
 
         [Fact]
@@ -187,7 +226,7 @@ namespace IP_UpdateTest.Tests.Core
             // 第二个文件被其他程序独占打开，不能改名：已替换的第一个文件要恢复
             using (new FileStream(Path.Combine(target, "IPTool.exe.config"), FileMode.Open, FileAccess.Read, FileShare.None))
             {
-                Assert.ThrowsAny<IOException>(() => UpdateInstaller.Install(source, target));
+                Assert.ThrowsAny<IOException>(() => UpdateInstaller.Install(source, target, "IPTool.exe"));
             }
 
             Assert.Equal("old", File.ReadAllText(Path.Combine(target, "IPTool.exe")));
@@ -201,9 +240,20 @@ namespace IP_UpdateTest.Tests.Core
             foreach (string name in new[] { "IPTool.exe.old", "IPTool.exe.old1", "IPTool.exe.config.old", "IPTool.exe", "IPTool.old.txt", "notes.old" })
                 File.WriteAllText(Path.Combine(target, name), "");
 
-            UpdateInstaller.CleanupBackups(target);
+            UpdateInstaller.CleanupBackups(target, "IPTool.exe");
 
             Assert.Equal(new[] { "IPTool.exe", "IPTool.old.txt", "notes.old" }, Directory.GetFiles(target).Select(Path.GetFileName).OrderBy(n => n, StringComparer.Ordinal).ToArray());
+        }
+
+        [Fact]
+        public void CleanupBackups_RenamedProgram()
+        {
+            foreach (string name in new[] { "NetTool.exe.old", "NetTool.exe.config.old2", "NetTool.exe", "NetTool.old" })
+                File.WriteAllText(Path.Combine(target, name), "");
+
+            UpdateInstaller.CleanupBackups(target, "NetTool.exe");
+
+            Assert.Equal(new[] { "NetTool.exe", "NetTool.old" }, Directory.GetFiles(target).Select(Path.GetFileName).OrderBy(n => n, StringComparer.Ordinal).ToArray());
         }
 
         [Fact]

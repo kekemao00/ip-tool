@@ -29,6 +29,11 @@ namespace IP_UpdateTest.Core.Update
         private readonly UpdateClient client;
         private CancellationTokenSource download;
 
+        /// <summary>
+        /// 已有新版本时在后台重新查询（状态保持 Available，胶囊不消失）
+        /// </summary>
+        private bool refreshing;
+
         public UpdateManager(Version current, UpdateClient client)
         {
             CurrentVersion = Versions.Normalize(current);
@@ -60,18 +65,29 @@ namespace IP_UpdateTest.Core.Update
 
         public bool IsBusy
         {
-            get { return State == UpdateState.Checking || State == UpdateState.Downloading || State == UpdateState.Verifying || State == UpdateState.Installing; }
+            get { return IsChecking || State == UpdateState.Downloading || State == UpdateState.Verifying || State == UpdateState.Installing; }
+        }
+
+        /// <summary>
+        /// 正在查询 GitHub（包括已有新版本时的重新查询）
+        /// </summary>
+        public bool IsChecking
+        {
+            get { return State == UpdateState.Checking || refreshing; }
         }
 
         /// <summary>
         /// 检查更新。返回新版本（没有更新时返回 null）；网络等错误抛出 UpdateException。
-        /// 已在下载或已就绪时不重复检查，直接返回当前的版本
+        /// 已在检查、下载或已就绪时不重复检查，直接返回当前的版本。
+        /// 已有新版本（Available）时安静地重新查询：期间可能又发布了更新的版本
         /// </summary>
         public async Task<ReleaseInfo> CheckAsync(CancellationToken cancel)
         {
-            if (State != UpdateState.Idle && State != UpdateState.Available && State != UpdateState.Failed) return Release;
+            if (refreshing || (State != UpdateState.Idle && State != UpdateState.Available && State != UpdateState.Failed)) return Release;
             UpdateState previous = State;
-            SetState(UpdateState.Checking);
+            bool quiet = State == UpdateState.Available;
+            if (quiet) refreshing = true;
+            else SetState(UpdateState.Checking);
             ReleaseInfo latest;
             try
             {
@@ -79,15 +95,22 @@ namespace IP_UpdateTest.Core.Update
             }
             catch (UpdateException)
             {
-                SetState(previous);
+                if (!quiet) SetState(previous);
                 throw;
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
                 // 意外的错误也只当作检查失败，不让后台检查把程序带崩
-                SetState(previous);
+                if (!quiet) SetState(previous);
                 throw new UpdateException(ex.Message, ex);
             }
+            finally
+            {
+                refreshing = false;
+            }
+
+            // 重新查询期间已经开始下载：不打断
+            if (quiet && State != UpdateState.Available) return Release;
 
             if (!Versions.IsNewer(latest.Version, CurrentVersion))
             {

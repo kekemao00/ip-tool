@@ -1,0 +1,7 @@
+# 每月检查一次 workflow 中用到的 Actions 是否有新版本，有则自动开 PR
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

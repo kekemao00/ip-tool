@@ -16,7 +16,7 @@ Windows 网络配置与诊断工具：一键切换网卡 IP / DNS 方案，分�
 - 需要 .NET Framework 4.8：Windows 10 1903 及以上、Windows 11 已自带
 - 请把 `IPTool.exe.config` 和 exe 放在一起（其中有高 DPI 设置）
 - 每个 Release 附有 `SHA256SUMS.txt`，可用于校验下载的文件
-- 之后的新版本可以在程序内直接更新，见下面的“应用内更新”
+- 从 v2.3.0 起，之后的新版本可以在程序内直接更新，见下面的“应用内更新”；v2.2.2 及更早的版本需要手动下载一次
 
 ## 功能
 
@@ -119,8 +119,10 @@ dotnet test IP_UpdateTest.sln
 发布新版本：
 
 1. 修改 `IP_UpdateTest/IP_UpdateTest.csproj` 中的 `<Version>`
-2. 在 `CHANGELOG.md` 中添加对应版本的小节（如 `## v2.0.1`），内容会作为 Release 说明
+2. 在 `CHANGELOG.md` 中添加对应版本的小节（如 `## v2.0.1`），内容会作为 Release 说明，也会显示在程序内的更新面板里（支持 `###` 小标题和 `-` 列表）
 3. 提交并推送到 main
+
+通过 PR 合并时，CI 在 PR 阶段就会检查：新版本要有对应的 CHANGELOG 小节，版本号要高于最新的 Release。
 
 ## 技术栈
 

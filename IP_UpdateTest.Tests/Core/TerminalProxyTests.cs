@@ -846,14 +846,69 @@ namespace IP_UpdateTest.Tests.Core
             Assert.Equal("已禁用", Row(report, "git").Badge);
             Assert.NotEqual(CheckStatus.Ok, report.Overall);
             ProxyChange change = Assert.Single(report.ApplyChanges);
-            Assert.Equal("删除 Git http.proxy", change.ToString());
+            Assert.Equal("Git http.proxy = http://127.0.0.1:10809", change.ToString());
             Assert.DoesNotContain(report.ClearChanges, c => c.Target == ProxyChangeTarget.Git);
+
+            // 原来的空值要备份：清除时恢复为空，而不是删掉（删掉后 Git 会改走环境变量里的代理）
+            var backup = new TerminalProxyBackup();
+            backup.Record(TerminalProxyBackup.KeyOf(change.Target, change.Key), change.OldValue, change.NewValue);
+            Assert.Equal("", backup.PreviousOf("Git:http.proxy"));
+            TerminalProxyBackup read = IP_UpdateTest.Core.JsonFile.Deserialize<TerminalProxyBackup>(IP_UpdateTest.Core.JsonFile.Serialize(backup));
+            f.Tools[0].Values["http.proxy"] = change.NewValue;
+            ProxyChange restore = Analyze(f, read).ClearChanges.Single(c => c.Target == ProxyChangeTarget.Git);
+            Assert.Equal("", restore.NewValue);
+            Assert.Equal("Git http.proxy = \"\"", restore.ToString());
 
             // 没有代理时 Git 直连是对的
             var g = new TerminalProxySnapshot();
             g.Tools.Add(new ToolProxySetting { Tool = ProxyTool.Git, Installed = true });
             g.Tools[0].Values["http.proxy"] = "";
             Assert.Equal(CheckStatus.Info, Row(Analyze(g), "git").Status);
+
+            // 只对某个网站生效的代理优先于空的 http.proxy：它失效了 Git 访问这个网站会失败，不能说直连
+            g.Tools[0].Values["http.https://github.com.proxy"] = "http://127.0.0.1:7890";
+            g.Reachable["127.0.0.1:7890"] = false;
+            report = Analyze(g);
+            Assert.Equal(CheckStatus.Fail, Row(report, "git").Status);
+            Assert.Equal(CheckStatus.Fail, report.Overall);
+
+            // 网站的代理能用时：仍提示 http.proxy 为空
+            g.Reachable["127.0.0.1:7890"] = true;
+            TerminalProxyRow row = Row(Analyze(g), "git");
+            Assert.Equal("直连", row.Badge);
+            Assert.Contains("单独设置了代理的网站", row.Detail);
+        }
+
+        [Fact]
+        public void Follower_KeepsFollowingToolsAfterRestoringTheirOriginal()
+        {
+            // 一键设置把 Git 的公司代理改成了 7890；系统代理关闭时恢复公司代理，再开时要重新改成代理，不能停在公司代理上
+            const string key = "Git:http.proxy", corp = "http://proxy.corp:8080";
+            var backup = new TerminalProxyBackup();
+            backup.Record(key, corp, "http://127.0.0.1:7890");
+            var git = new ToolProxySetting { Tool = ProxyTool.Git, Installed = true };
+            git.Values["http.proxy"] = "http://127.0.0.1:7890";
+
+            var off = new TerminalProxySnapshot();
+            off.Tools.Add(git);
+            ProxyChange restore = TerminalProxyFollower.Decide(off, backup).Single(c => c.Target == ProxyChangeTarget.Git);
+            Assert.Equal(corp, restore.NewValue);
+            // 跟随恢复后仍记作本程序管理的（TerminalProxyConfigurator.Apply 的 following 分支）
+            backup.Record(key, restore.OldValue, restore.NewValue);
+            git.Values["http.proxy"] = corp;
+
+            var on = new TerminalProxySnapshot { SystemProxyEnabled = true, SystemProxyServer = "127.0.0.1:7897" };
+            on.Tools.Add(git);
+            Assert.Contains(TerminalProxyFollower.Decide(on, backup), c => c.Target == ProxyChangeTarget.Git && c.NewValue == "http://127.0.0.1:7897");
+            Assert.Equal(corp, backup.PreviousOf(key));
+
+            // 只对某个网站生效的项同理：本程序写过的不当作用户的分流
+            var site = new ToolProxySetting { Tool = ProxyTool.Git, Installed = true };
+            site.Values["http.https://git.corp.example.proxy"] = corp;
+            backup.Record("Git:http.https://git.corp.example.proxy", "http://127.0.0.1:7890", corp);
+            var on2 = new TerminalProxySnapshot { SystemProxyEnabled = true, SystemProxyServer = "127.0.0.1:7897" };
+            on2.Tools.Add(site);
+            Assert.Contains(TerminalProxyFollower.Decide(on2, backup), c => c.Key == "http.https://git.corp.example.proxy");
         }
 
         [Fact]

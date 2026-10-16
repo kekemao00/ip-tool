@@ -321,7 +321,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
         public override string ToString()
         {
             string where = Target == ProxyChangeTarget.Environment ? "" : ToolProxySetting.NameOf((ProxyTool)(Target - 1)) + " ";
-            return NewValue == null ? $"删除 {where}{Key}" : $"{where}{Key} = {NewValue}";
+            return NewValue == null ? $"删除 {where}{Key}" : $"{where}{Key} = {(NewValue.Length == 0 ? "\"\"" : NewValue)}";
         }
     }
 
@@ -377,12 +377,17 @@ namespace IP_UpdateTest.Core.TerminalProxy
         public bool Wrote(string key, string current)
         {
             string value = Find(Written, key);
+            if (value == Blank) return current == "";
             return value != null && current != null && string.Equals(value.Trim().TrimEnd('/'), current.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// 本程序改之前的值；"" 表示原来是空值（Git 的 http.proxy 为空表示不走代理），null 表示原来没有
+        /// </summary>
         public string PreviousOf(string key)
         {
-            return Find(Previous, key);
+            string value = Find(Previous, key);
+            return value == Blank ? "" : value;
         }
 
         /// <summary>
@@ -393,11 +398,13 @@ namespace IP_UpdateTest.Core.TerminalProxy
             if (Find(Written, key) == null || !Wrote(key, oldValue))
             {
                 Remove(Previous, key);
-                if (!string.IsNullOrWhiteSpace(oldValue)) Previous[key] = oldValue.Trim();
+                if (oldValue == "") Previous[key] = Blank;
+                else if (!string.IsNullOrWhiteSpace(oldValue)) Previous[key] = oldValue.Trim();
             }
             Remove(Written, key);
-            // 删除（如 Git 的空 http.proxy）之后没有本程序写入的值
-            if (newValue != null) Written[key] = newValue;
+            // 删除之后没有本程序写入的值
+            if (newValue == "") Written[key] = Blank;
+            else if (newValue != null) Written[key] = newValue;
         }
 
         /// <summary>
@@ -433,6 +440,9 @@ namespace IP_UpdateTest.Core.TerminalProxy
             Remove(Previous, key);
             Remove(Written, key);
         }
+
+        // 空值（不是没有）存成这个，Find 会把空白当作没有
+        private const string Blank = "\"\"";
 
         // 反序列化得到的字典区分大小写，按不区分大小写查找
         private static string Find(Dictionary<string, string> values, string key)

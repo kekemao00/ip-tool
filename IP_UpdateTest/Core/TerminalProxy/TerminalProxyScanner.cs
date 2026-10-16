@@ -450,7 +450,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
 
         private static string Quote(string arg)
         {
-            return arg.IndexOfAny(new[] { ' ', '"', '*', '?' }) >= 0 ? "\"" + arg.Replace("\"", "\\\"") + "\"" : arg;
+            // 空值（如恢复 Git 的空 http.proxy）也要写成 ""，不然 git 收不到这个参数
+            return arg.Length == 0 || arg.IndexOfAny(new[] { ' ', '"', '*', '?' }) >= 0 ? "\"" + arg.Replace("\"", "\\\"") + "\"" : arg;
         }
     }
 }

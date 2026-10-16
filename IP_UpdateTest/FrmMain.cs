@@ -123,6 +123,7 @@ namespace IP_UpdateTest
             WireEvents();
             ApplyHints();
             UpdateWindowHeight();
+            InitUpdates();
 
             selectedAdapterId = initialAdapterId;
             this.startInTray = startInTray;
@@ -834,6 +835,7 @@ namespace IP_UpdateTest
             moreMenu.Items.Add(new ToolStripSeparator());
             moreMenu.Items.Add(Menus.Item("打开系统“网络连接”", Glyph.ExternalLink, (s, ev) => OpenNetworkConnections()));
             moreMenu.Items.Add(new ToolStripSeparator());
+            moreMenu.Items.Add(UpdateMenuItem());
             AddSettingItems(moreMenu.Items);
             moreMenu.Show(btnMore, new System.Drawing.Point(0, btnMore.Height + P(4)));
         }
@@ -1037,6 +1039,23 @@ namespace IP_UpdateTest
         private void RestartAsAdministrator()
         {
             NetworkAdapter adapter = SelectedAdapter;
+            StashPendingEdit();
+
+            string arguments = adapter == null ? "" : "--adapter " + adapter.NetworkInterfaceID;
+            if (Elevation.StartElevated(arguments) == null)
+            {
+                PendingEdit.Clear(); // 用户取消了 UAC
+                return;
+            }
+            ExitApplication();
+        }
+
+        /// <summary>
+        /// 重启前暂存未应用的修改，新进程启动后回填
+        /// </summary>
+        private void StashPendingEdit()
+        {
+            NetworkAdapter adapter = SelectedAdapter;
             if (isDirty && adapter != null)
             {
                 try
@@ -1062,14 +1081,6 @@ namespace IP_UpdateTest
             {
                 PendingEdit.Clear();
             }
-
-            string arguments = adapter == null ? "" : "--adapter " + adapter.NetworkInterfaceID;
-            if (Elevation.StartElevated(arguments) == null)
-            {
-                PendingEdit.Clear(); // 用户取消了 UAC
-                return;
-            }
-            ExitApplication();
         }
 
         /// <summary>
@@ -1291,6 +1302,7 @@ namespace IP_UpdateTest
                 SetStatus(settings.MinimizeToTray ? "关闭窗口时将最小化到托盘" : "关闭窗口时将直接退出", StatusKind.Success);
             }));
             list.Add(new PaletteCommand(prefs, (AutoStart.IsEnabled ? "关闭" : "开启") + "开机自动启动", Glyph.Zap, ToggleAutoStart));
+            AddUpdateCommands(list, prefs);
             if (showElevation) list.Add(new PaletteCommand(prefs, "以管理员身份重启", Glyph.Shield, RestartAsAdministrator) { Keywords = "admin 管理员 权限" });
             list.Add(new PaletteCommand(prefs, "退出程序", Glyph.LogOut, ExitApplication) { Keywords = "exit quit" });
             return list;
@@ -1350,6 +1362,7 @@ namespace IP_UpdateTest
             }));
 
             trayMenu.Items.Add(new ToolStripSeparator());
+            trayMenu.Items.Add(UpdateMenuItem());
             AddSettingItems(trayMenu.Items);
             trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add(Menus.Item("退出", Glyph.LogOut, (s, e) => ExitApplication()));
@@ -1370,6 +1383,7 @@ namespace IP_UpdateTest
             autoStart.Checked = AutoStart.IsEnabled;
             items.Add(tray);
             items.Add(autoStart);
+            items.Add(AutoUpdateMenuItem());
         }
 
         private void ToggleAutoStart()

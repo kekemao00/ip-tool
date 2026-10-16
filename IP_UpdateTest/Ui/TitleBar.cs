@@ -58,6 +58,11 @@ namespace IP_UpdateTest.Ui
         public event Action Changed;
 
         /// <summary>
+        /// 胶囊右边不越过的位置（设备像素）。标题栏有更新胶囊时设为它的左边，通知往左让开，不盖住它
+        /// </summary>
+        public float RightLimit { get; set; } = float.MaxValue;
+
+        /// <summary>
         /// 显示一条通知。maxWidth 为宿主可用宽度（逻辑像素）
         /// </summary>
         public void Notify(NoticeKind kind, string text, float maxWidth)
@@ -146,7 +151,9 @@ namespace IP_UpdateTest.Ui
         {
             float w = (float)width.ValueAt(now) * scale, h = (float)height.ValueAt(now) * scale;
             float cy = (Top + Height / 2) * scale;
-            return new RectangleF(hostWidth / 2 - w / 2, cy - h / 2, w, h);
+            float cx = hostWidth / 2;
+            if (cx + w / 2 > RightLimit) cx = Math.Max(w / 2 + 8 * scale, RightLimit - w / 2);
+            return new RectangleF(cx - w / 2, cy - h / 2, w, h);
         }
 
         public void Paint(Graphics g, float hostWidth, float scale, double now)
@@ -221,7 +228,23 @@ namespace IP_UpdateTest.Ui
     }
 
     /// <summary>
-    /// 窗口顶栏：标识、标题、命令面板入口、最小化 / 关闭；按住空白处拖动窗口。通知胶囊画在顶栏上
+    /// 标题栏里的更新胶囊
+    /// </summary>
+    public enum UpdateBadgeKind
+    {
+        None,
+        /// <summary>有新版本：强调色圆点</summary>
+        Available,
+        /// <summary>下载 / 校验中：进度环</summary>
+        Progress,
+        /// <summary>已就绪：向上箭头</summary>
+        Ready,
+        /// <summary>失败：红点</summary>
+        Failed
+    }
+
+    /// <summary>
+    /// 窗口顶栏：标识、标题、更新胶囊、命令面板入口、最小化 / 关闭；按住空白处拖动窗口。通知胶囊画在顶栏上
     /// </summary>
     public class TitleBar : SpringControl
     {
@@ -230,12 +253,21 @@ namespace IP_UpdateTest.Ui
 
         private readonly List<BarButton> buttons = new List<BarButton>();
         private readonly BarButton search;
+        private readonly BarButton update;
         private readonly BarButton minimize;
         private readonly BarButton close;
         private BarButton hovered;
         private BarButton pressed;
         private string chip;
         private string subtitle;
+
+        // 更新胶囊：出现 / 消失淡入淡出，宽度随文字用 smooth 弹簧变化，文字在模糊里换掉
+        private readonly SpringValue updateAlpha = new SpringValue(0, Spring.Smooth);
+        private readonly SpringValue updateWidth = new SpringValue(0, Spring.Smooth);
+        private readonly SpringValue updateProgress = new SpringValue(0, Spring.Smooth);
+        private readonly Crossfade<string> updateText = new Crossfade<string>("");
+        private UpdateBadgeKind updateKind;
+        private UpdateBadgeKind updatePaintedKind;
 
         public TitleBar(Island island)
         {
@@ -246,8 +278,10 @@ namespace IP_UpdateTest.Ui
             BackColor = Palette.Canvas;
 
             search = new BarButton { Glyph = Glyph.Search, Label = "搜索操作", Hint = "Ctrl K", Tip = "搜索并执行操作（Ctrl+K）", Visible = false };
+            update = new BarButton { Visible = false };
             minimize = new BarButton { Glyph = Glyph.Minimize, Tip = "最小化" };
             close = new BarButton { Glyph = Glyph.Close, Tip = "关闭" };
+            buttons.Add(update);
             buttons.Add(search);
             buttons.Add(minimize);
             buttons.Add(close);
@@ -269,6 +303,77 @@ namespace IP_UpdateTest.Ui
         /// 命令面板入口被点击
         /// </summary>
         public event EventHandler SearchClicked;
+
+        /// <summary>
+        /// 更新胶囊被点击
+        /// </summary>
+        public event EventHandler UpdateClicked;
+
+        /// <summary>
+        /// 显示 / 更新 / 隐藏更新胶囊。progress 为 0..1（只在 Progress 时使用）
+        /// </summary>
+        public void SetUpdateBadge(UpdateBadgeKind kind, string text, double progress, string tip)
+        {
+            double now = Motion.Now;
+            bool wasShown = updateKind != UpdateBadgeKind.None;
+            bool sameKind = kind == updateKind;
+            updateKind = kind;
+            update.Tip = tip;
+            if (kind == UpdateBadgeKind.None)
+            {
+                update.Visible = false;
+                updateAlpha.Set(0, now);
+                updateWidth.Set(0, now);
+                if (hovered == update) hovered = null;
+                Animate();
+                return;
+            }
+
+            update.Visible = true;
+            updatePaintedKind = kind;
+            text = text ?? "";
+            float target = 11 + 12 + 7 + Typo.Measure(text, TextStyle.Small, 1) + 13;
+            if (!wasShown)
+            {
+                updateText.Reset(text);
+                updateWidth.Snap(target * 0.86);
+                updateProgress.Snap(Motion.Clamp01(progress));
+            }
+            else if (sameKind && kind == UpdateBadgeKind.Progress)
+            {
+                // 下载百分比直接换数字，不做模糊过渡
+                updateText.Reset(text);
+            }
+            else
+            {
+                updateText.Set(text, now);
+            }
+            updateWidth.Set(target, now);
+            updateAlpha.Set(1, now);
+            updateProgress.Set(Motion.Clamp01(progress), now);
+            if (hovered == update) InkToolTip.Shared.SetToolTip(this, tip ?? "");
+            Animate();
+        }
+
+        /// <summary>
+        /// 更新胶囊的位置（设备像素），更新面板从它变形展开
+        /// </summary>
+        public Rectangle UpdateBadgeBounds
+        {
+            get
+            {
+                LayoutButtons();
+                return update.Visible ? Rectangle.Round(update.Bounds) : Rectangle.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 更新胶囊当前的底色，面板从胶囊展开时从这个颜色过渡
+        /// </summary>
+        public Color UpdateBadgeColor
+        {
+            get { return updatePaintedKind == UpdateBadgeKind.Failed ? Palette.DangerSoft : Palette.AccentSoft; }
+        }
 
         public bool ShowSearch
         {
@@ -348,6 +453,15 @@ namespace IP_UpdateTest.Ui
                 x -= Px(8) + w;
                 search.Bounds = new RectangleF(x, cy - h / 2, w, h);
             }
+            double now = Motion.Now;
+            float updateW = Px((float)Math.Max(0, updateWidth.ValueAt(now)));
+            if (updateW > 0.5f)
+            {
+                float h = Px(30);
+                x -= Px(8) * (float)Motion.Clamp01(updateAlpha.ValueAt(now)) + updateW;
+                update.Bounds = new RectangleF(x, cy - h / 2, updateW, h);
+            }
+            else update.Bounds = RectangleF.Empty;
         }
 
         private BarButton HitTest(Point p)
@@ -413,6 +527,10 @@ namespace IP_UpdateTest.Ui
                 {
                     if (SearchClicked != null) SearchClicked(this, EventArgs.Empty);
                 }
+                else if (b == update)
+                {
+                    if (UpdateClicked != null) UpdateClicked(this, EventArgs.Empty);
+                }
                 else if (b.Click != null) b.Click();
             }
         }
@@ -421,6 +539,7 @@ namespace IP_UpdateTest.Ui
         {
             foreach (BarButton b in buttons)
                 if (b.Hover.IsAnimatingAt(now) || b.Press.IsAnimatingAt(now)) return true;
+            if (updateAlpha.IsAnimatingAt(now) || updateWidth.IsAnimatingAt(now) || updateProgress.IsAnimatingAt(now) || updateText.IsAnimatingAt(now)) return true;
             return Island.IsAnimatingAt(now);
         }
 
@@ -454,9 +573,11 @@ namespace IP_UpdateTest.Ui
                 Chips.Draw(g, chip, x, Height / 2f, s, 1);
             }
 
+            PaintUpdateBadge(g, now, s);
+
             foreach (BarButton b in buttons)
             {
-                if (!b.Visible) continue;
+                if (!b.Visible || b == update) continue;
                 double hover = b.Hover.ValueAt(now), press = b.Press.ValueAt(now);
                 if (b == search)
                 {
@@ -479,7 +600,70 @@ namespace IP_UpdateTest.Ui
                     Palette.Mix(Palette.Ink2, Palette.Ink, hover), s);
             }
 
+            // 有更新胶囊时通知往左让开（跟着胶囊宽度的弹簧一起移动）
+            Island.RightLimit = update.Bounds.Width > 0.5f ? update.Bounds.Left - Px(8) : float.MaxValue;
             Island.Paint(g, Width, s, now);
+        }
+
+        /// <summary>
+        /// 浅强调色胶囊：前面是状态标记（圆点 / 进度环 / 向上箭头），后面是文字
+        /// </summary>
+        private void PaintUpdateBadge(Graphics g, double now, float s)
+        {
+            double alpha = Motion.Clamp01(updateAlpha.ValueAt(now));
+            RectangleF r = update.Bounds;
+            if (alpha < 0.005 || r.Width < 1) return;
+            bool failed = updatePaintedKind == UpdateBadgeKind.Failed;
+            Color tint = failed ? Palette.Danger : Palette.Accent;
+            Color soft = failed ? Palette.DangerSoft : Palette.AccentSoft;
+            double hover = update.Hover.ValueAt(now), press = update.Press.ValueAt(now);
+            Color fill = Palette.Mix(soft, Palette.Mix(soft, tint, 0.16), Math.Max(hover * 0.6, press));
+            Shapes.Fill(g, r, r.Height / 2, Palette.Fade(fill, alpha));
+
+            var state = g.Save();
+            g.SetClip(r);
+            float cx = r.X + Px(11 + 6), cy = r.Y + r.Height / 2;
+            switch (updatePaintedKind)
+            {
+                case UpdateBadgeKind.Progress:
+                {
+                    float d = Px(12);
+                    var ring = new RectangleF(cx - d / 2, cy - d / 2, d, d);
+                    using (var track = new Pen(Palette.Fade(tint, 0.2 * alpha), Px(1.75f)))
+                        g.DrawEllipse(track, ring);
+                    double p = Motion.Clamp01(updateProgress.ValueAt(now));
+                    if (p > 0.005)
+                    {
+                        using (var pen = new Pen(Palette.Fade(tint, alpha), Px(1.75f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                            g.DrawArc(pen, ring, -90, (float)(p * 360));
+                    }
+                    break;
+                }
+                case UpdateBadgeKind.Ready:
+                {
+                    float icon = Px(14);
+                    Icons.Draw(g, Glyph.ArrowUpCircle, new RectangleF(cx - icon / 2, cy - icon / 2, icon, icon), Palette.Fade(tint, alpha), s);
+                    break;
+                }
+                default:
+                {
+                    float halo = Px(12), dot = Px(6);
+                    using (var brush = new SolidBrush(Palette.Fade(tint, 0.16 * alpha)))
+                        g.FillEllipse(brush, cx - halo / 2, cy - halo / 2, halo, halo);
+                    using (var brush = new SolidBrush(Palette.Fade(tint, alpha)))
+                        g.FillEllipse(brush, cx - dot / 2, cy - dot / 2, dot, dot);
+                    break;
+                }
+            }
+
+            float textX = r.X + Px(11 + 12 + 7);
+            foreach (var layer in updateText.Layers(now))
+            {
+                if (string.IsNullOrEmpty(layer.Value)) continue;
+                float baseline = Typo.CenterBaseline(r, TextStyle.Small, s) + (float)layer.OffsetY * s;
+                Typo.DrawLine(g, layer.Value, TextStyle.Small, tint, textX, baseline, s, alpha * layer.Opacity, layer.Blur);
+            }
+            g.Restore(state);
         }
 
         [DllImport("user32.dll")]

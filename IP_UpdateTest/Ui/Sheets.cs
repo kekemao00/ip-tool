@@ -203,6 +203,8 @@ namespace IP_UpdateTest.Ui
         private readonly Control previousFocus;
         private RectangleF target;
         private double closedAt = double.NaN;
+        private Func<Rectangle> liveOrigin;
+        private Func<Color> liveColor;
         private bool tickerRunning;
 
         private SheetOverlay(ThemedForm form, SheetContent content, Rectangle originRect, Color originColor, float originRadius)
@@ -221,7 +223,9 @@ namespace IP_UpdateTest.Ui
             {
                 using (Graphics g = Graphics.FromImage(snapshot))
                 {
-                    Color behind = SampleBehind(snapshot, originRect);
+                    // 顶栏里的控件（如更新胶囊）旁边可能正好是通知胶囊，直接用顶栏的底色
+                    bool inTitleBar = form.TitleBar != null && originRect.Bottom <= form.TitleBar.Bottom;
+                    Color behind = inTitleBar ? Palette.Canvas : SampleBehind(snapshot, originRect);
                     using (var brush = new SolidBrush(behind))
                         g.FillRectangle(brush, Rectangle.Inflate(originRect, 1, 1));
                 }
@@ -252,17 +256,6 @@ namespace IP_UpdateTest.Ui
         /// </summary>
         public static Task<object> Show(ThemedForm form, SheetContent content, Control origin)
         {
-            // 前一个面板正在收起时直接结束它，避免被截进新画面
-            foreach (Control c in form.Controls)
-            {
-                var overlay = c as SheetOverlay;
-                if (overlay != null && overlay.IsClosing)
-                {
-                    overlay.Finish();
-                    break;
-                }
-            }
-
             Rectangle rect = Rectangle.Empty;
             Color color = Palette.Surface;
             float radius = Metrics.ButtonRadius * form.DeviceDpi / 96f;
@@ -295,9 +288,49 @@ namespace IP_UpdateTest.Ui
         /// </summary>
         public static Task<object> Show(ThemedForm form, SheetContent content, Rectangle originRect, Color originColor, float originRadius)
         {
+            FinishClosing(form);
             var overlay = new SheetOverlay(form, content, originRect, originColor, originRadius);
             overlay.Open();
             return overlay.Task;
+        }
+
+        /// <summary>
+        /// 从会变化的位置展开（如标题栏的更新胶囊，宽度和颜色随状态变化）：
+        /// 每一帧按它现在的位置和颜色画，面板开着时它变了，收起时也回到变化后的样子
+        /// </summary>
+        public static Task<object> Show(ThemedForm form, SheetContent content, Func<Rectangle> origin, Func<Color> originColor, float originRadius)
+        {
+            FinishClosing(form);
+            var overlay = new SheetOverlay(form, content, origin(), originColor(), originRadius)
+            {
+                liveOrigin = origin,
+                liveColor = originColor
+            };
+            overlay.Open();
+            return overlay.Task;
+        }
+
+        /// <summary>
+        /// 前一个面板正在收起时直接结束它，避免被截进新画面
+        /// </summary>
+        private static void FinishClosing(ThemedForm form)
+        {
+            foreach (Control c in form.Controls)
+            {
+                var closing = c as SheetOverlay;
+                if (closing != null && closing.IsClosing)
+                {
+                    closing.Finish();
+                    break;
+                }
+            }
+        }
+
+        private RectangleF CurrentOrigin()
+        {
+            if (liveOrigin == null || origin.IsEmpty) return origin;
+            Rectangle now = liveOrigin();
+            return now.IsEmpty ? origin : now;
         }
 
         private void Open()
@@ -383,14 +416,15 @@ namespace IP_UpdateTest.Ui
                 g.FillRectangle(brush, ClientRectangle);
 
             double p = progress.ValueAt(now);
-            RectangleF from = origin.IsEmpty ? ScaleAround(target, 0.92f) : (RectangleF)origin;
+            RectangleF from = origin.IsEmpty ? ScaleAround(target, 0.92f) : CurrentOrigin();
             RectangleF shape = Shapes.Lerp(from, target, p);
             float radius = (float)Motion.Lerp(originRadius, Metrics.PanelRadius * s, Motion.Clamp01(p));
             double colorT = Motion.Clamp01(p * 1.6);
             double alpha = origin.IsEmpty ? Motion.Clamp01(p * 2) : 1;
             if (shape.Width > 1 && shape.Height > 1)
             {
-                Shapes.Fill(g, shape, radius, Palette.Fade(Palette.Mix(originColor, Palette.Surface, colorT), alpha));
+                Color fromColor = liveColor != null ? liveColor() : originColor;
+                Shapes.Fill(g, shape, radius, Palette.Fade(Palette.Mix(fromColor, Palette.Surface, colorT), alpha));
                 Shapes.Stroke(g, shape, radius, Palette.Fade(Palette.Line, Motion.Clamp01(p * 2) * alpha), s);
             }
 

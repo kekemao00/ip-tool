@@ -44,6 +44,21 @@ namespace IP_UpdateTest.Core
         [DataMember] public bool TrayHintShown { get; set; }
 
         /// <summary>
+        /// 关闭了自动检查更新（默认每次启动及每隔约一天检查一次）
+        /// </summary>
+        [DataMember] public bool UpdateCheckDisabled { get; set; }
+
+        /// <summary>
+        /// 上次成功检查更新的时间
+        /// </summary>
+        [DataMember] public DateTime? LastUpdateCheck { get; set; }
+
+        /// <summary>
+        /// 用户选择跳过的版本标签（如 v2.3.0），自动检查到这个版本时不再提醒
+        /// </summary>
+        [DataMember] public string SkippedVersion { get; set; }
+
+        /// <summary>
         /// 命令行代理跟随系统代理（程序在后台运行时生效）
         /// </summary>
         [DataMember] public bool FollowSystemProxy { get; set; }

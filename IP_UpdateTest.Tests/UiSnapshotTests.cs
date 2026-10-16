@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using IP_UpdateTest.Core;
 using IP_UpdateTest.Core.Diagnosis;
 using IP_UpdateTest.Core.TerminalProxy;
+using IP_UpdateTest.Core.Update;
 using IP_UpdateTest.Ui;
 using Xunit;
 
@@ -60,6 +61,7 @@ namespace IP_UpdateTest.Tests
 
                 List<NetworkAdapter> adapters = SampleAdapters();
                 RenderMain(adapters);
+                RenderUpdate(adapters);
                 RenderProfiles(adapters);
                 RenderDnsBenchmark();
                 RenderDiagnosis();
@@ -99,6 +101,46 @@ namespace IP_UpdateTest.Tests
                 form.OpenCommandPalette();
                 Save(form, "main-admin-palette");
                 CloseSheets(form);
+            }
+        }
+
+        /// <summary>
+        /// 应用内更新：标题栏胶囊和更新面板的各个状态
+        /// </summary>
+        private void RenderUpdate(List<NetworkAdapter> adapters)
+        {
+            var release = new ReleaseInfo
+            {
+                Version = new Version(9, 1, 0),
+                Tag = "v9.1.0",
+                PublishedAt = new DateTime(2026, 10, 20, 16, 0, 0),
+                PackageName = "IPTool-v9.1.0.zip",
+                PackageSize = 452608,
+                PageUrl = "https://github.com/kekemao00/ip-tool/releases/tag/v9.1.0",
+                Notes = "### 新功能\n\n- 应用内更新：自动检查 GitHub 上的新版本，在程序里下载、校验并替换，重启即用\n- 标题栏出现更新提示，不弹窗打扰；下载可以在后台继续\n\n### 改进\n\n- 安装包经过 SHA-256 校验，替换失败时自动恢复原来的程序\n- 程序在受保护的文件夹中时，只在替换文件时请求一次管理员权限\n- 配置方案和设置都保留在 %APPDATA%\\IPTool\n\n## What's Changed\n* 应用内更新 by @someone"
+            };
+            using (var form = new FrmMain(null, false, new AppSettings(), true) { SnapshotMode = true })
+            {
+                Open(form);
+                form.BindAdapterList(adapters);
+                form.Updates.Simulate(UpdateState.Available, release);
+                Save(form, "main-update");
+
+                form.OpenUpdateSheet();
+                Save(form, "update-available");
+
+                form.Updates.Simulate(UpdateState.Downloading, release, new DownloadProgress(190464, 452608, 1310720));
+                Save(form, "update-downloading");
+
+                form.Updates.Simulate(UpdateState.Ready, release);
+                Save(form, "update-ready");
+
+                form.Updates.Simulate(UpdateState.Failed, release, default(DownloadProgress), "下载超时，请检查网络或代理后重试");
+                Save(form, "update-failed");
+                CloseSheets(form);
+
+                form.Updates.Simulate(UpdateState.Downloading, release, new DownloadProgress(301000, 452608, 1310720));
+                Save(form, "main-update-downloading");
             }
         }
 

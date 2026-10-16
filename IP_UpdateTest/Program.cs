@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 using IP_UpdateTest.Core;
+using IP_UpdateTest.Core.Update;
 
 namespace IP_UpdateTest
 {
@@ -15,10 +16,15 @@ namespace IP_UpdateTest
         [STAThread]
         static int Main(string[] args)
         {
+            // 以管理员身份替换程序文件（应用内更新时由界面进程启动）
+            if (UpdateInstaller.IsInstallInvocation(args)) return UpdateInstaller.RunFromCommandLine(args);
             if (CommandLine.IsCliInvocation(args)) return CommandLine.Run(args);
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            // 更新后由旧版本启动：等旧进程退出，否则会被单实例挡住
+            UpdateInstaller.WaitForPreviousInstance(args);
 
             bool createdNew;
             using (var mutex = new Mutex(true, SingleInstance.MutexName, out createdNew))
@@ -31,7 +37,7 @@ namespace IP_UpdateTest
 
                 AutoStart.RefreshPath(Application.ExecutablePath);
                 bool startInTray = args.Contains(AutoStart.TrayArgument, StringComparer.OrdinalIgnoreCase);
-                Application.Run(new FrmMain(GetArgument(args, "--adapter"), startInTray));
+                Application.Run(new FrmMain(GetArgument(args, "--adapter"), startInTray) { UpdatedFrom = GetArgument(args, UpdateInstaller.UpdatedFromArgument) });
             }
             return 0;
         }

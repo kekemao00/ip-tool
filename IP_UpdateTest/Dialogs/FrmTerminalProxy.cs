@@ -130,8 +130,10 @@ namespace IP_UpdateTest
             int pad = P(16);
             int inner = width - pad * 2;
             int hintH = HintHeight(inner);
-            // 命令太长时折行，框随之变高
-            int codeH = code.HeightFor(inner, P(82));
+            // 命令太长时折行，框随之变高，但最多七行左右，上方的检测结果也至少留出几行的高度（很长的 NO_PROXY 截断显示，复制的仍是完整命令）
+            int fixedH = pad + P(36) + P(12) + P(10) + hintH + P(14);
+            int maxCodeH = Math.Max(P(82), Math.Min(P(176), footerY - P(16) - fixedH - P(12) - top - P(160)));
+            int codeH = Math.Min(code.HeightFor(inner, P(82)), maxCodeH);
             int snippetH = pad + P(36) + P(12) + codeH + P(10) + hintH + P(14);
             pnlSnippet.SetBounds(gutter, footerY - P(16) - snippetH, width, snippetH);
             int segW = Math.Min(P(330), inner / 2);

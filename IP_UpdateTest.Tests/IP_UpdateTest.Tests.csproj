@@ -15,6 +15,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\IP_UpdateTest\IP_UpdateTest.csproj" />
   </ItemGroup>
 

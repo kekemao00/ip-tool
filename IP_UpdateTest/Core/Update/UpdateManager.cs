@@ -30,9 +30,14 @@ namespace IP_UpdateTest.Core.Update
         private CancellationTokenSource download;
 
         /// <summary>
-        /// 已有新版本时在后台重新查询（状态保持 Available，胶囊不消失）
+        /// 已有新版本或下载失败时在后台重新查询（状态不变，胶囊不消失）
         /// </summary>
         private bool refreshing;
+
+        /// <summary>
+        /// 状态变化的次数：重新查询期间状态变过（开始下载、重试、又失败）就不用查询结果覆盖它
+        /// </summary>
+        private int stateChanges;
 
         public UpdateManager(Version current, UpdateClient client)
         {
@@ -79,13 +84,15 @@ namespace IP_UpdateTest.Core.Update
         /// <summary>
         /// 检查更新。返回新版本（没有更新时返回 null）；网络等错误抛出 UpdateException。
         /// 已在检查、下载或已就绪时不重复检查，直接返回当前的版本。
-        /// 已有新版本（Available）时安静地重新查询：期间可能又发布了更新的版本
+        /// 已有新版本（Available）或下载失败（Failed）时安静地重新查询：期间可能又发布了更新的版本，
+        /// 或者失败的版本被撤下、换成了修正的版本
         /// </summary>
         public async Task<ReleaseInfo> CheckAsync(CancellationToken cancel)
         {
             if (refreshing || (State != UpdateState.Idle && State != UpdateState.Available && State != UpdateState.Failed)) return Release;
             UpdateState previous = State;
-            bool quiet = State == UpdateState.Available;
+            int stamp = stateChanges;
+            bool quiet = State == UpdateState.Available || State == UpdateState.Failed;
             if (quiet) refreshing = true;
             else SetState(UpdateState.Checking);
             ReleaseInfo latest;
@@ -109,8 +116,8 @@ namespace IP_UpdateTest.Core.Update
                 refreshing = false;
             }
 
-            // 重新查询期间已经开始下载：不打断
-            if (quiet && State != UpdateState.Available) return Release;
+            // 重新查询期间已经开始下载或重试：不打断
+            if (quiet && stateChanges != stamp) return Release;
 
             if (!Versions.IsNewer(latest.Version, CurrentVersion))
             {
@@ -229,6 +236,7 @@ namespace IP_UpdateTest.Core.Update
         private void SetState(UpdateState state)
         {
             State = state;
+            stateChanges++;
             Raise();
         }
 

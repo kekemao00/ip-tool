@@ -120,15 +120,15 @@ namespace IP_UpdateTest
 
         /// <summary>
         /// 检查更新。手动检查时显示结果，有新版本直接打开更新面板；自动检查只在发现新版本时轻轻提示。
-        /// 已有新版本但还没下载时也会重新查询，期间可能又发布了更新的版本
+        /// 已有新版本但还没下载、或下载失败时也会重新查询，期间可能又发布了更新或修正的版本
         /// </summary>
         private async Task CheckForUpdatesAsync(bool manual)
         {
             if (manual)
             {
                 ShowWindowIfHidden();
-                // 正在下载、已就绪或失败：直接打开面板
-                if (updates.HasUpdate && updates.State != UpdateState.Available)
+                // 正在下载或已就绪：直接打开面板（失败时先重新查询，可能已经发布了修正的版本）
+                if (updates.HasUpdate && updates.State != UpdateState.Available && updates.State != UpdateState.Failed)
                 {
                     OpenUpdateSheet();
                     return;
@@ -143,7 +143,7 @@ namespace IP_UpdateTest
             else
             {
                 if (settings.UpdateCheckDisabled || updates.IsBusy || HasSheet
-                    || (updates.HasUpdate && updates.State != UpdateState.Available)) return;
+                    || (updates.HasUpdate && updates.State != UpdateState.Available && updates.State != UpdateState.Failed)) return;
                 bool due = !startupUpdateCheckDone || !settings.LastUpdateCheck.HasValue
                     || DateTime.Now - settings.LastUpdateCheck.Value >= UpdateCheckInterval;
                 if (!due) return;
@@ -270,7 +270,8 @@ namespace IP_UpdateTest
             var sheet = new UpdateSheet(updates, SkipUpdate, InstallUpdateAsync, OpenReleasePage);
             System.Drawing.Rectangle origin = TitleBar.UpdateBadgeBounds;
             if (origin.IsEmpty) await SheetOverlay.Show(this, sheet, null);
-            else await SheetOverlay.Show(this, sheet, origin, TitleBar.UpdateBadgeColor, origin.Height / 2f);
+            // 面板开着时胶囊会变（如下载失败变红、重试后变回进度），收起时回到它现在的样子
+            else await SheetOverlay.Show(this, sheet, () => TitleBar.UpdateBadgeBounds, () => TitleBar.UpdateBadgeColor, origin.Height / 2f);
         }
 
         private void SkipUpdate()

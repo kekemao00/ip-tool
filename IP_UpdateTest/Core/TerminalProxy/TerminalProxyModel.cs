@@ -87,7 +87,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
         }
 
         /// <summary>
-        /// 这个工具认的设置项
+        /// 配置文件里的代理项（Git 另外还有 http.&lt;url&gt;.proxy，见 TerminalProxyScanner）
         /// </summary>
         public static string[] KeysOf(ProxyTool tool)
         {
@@ -97,6 +97,14 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 case ProxyTool.Npm: return new[] { "proxy", "https-proxy" };
                 default: return new[] { "proxy" };
             }
+        }
+
+        /// <summary>
+        /// 工具其实不读的项：Git 只认 http.proxy 和 http.&lt;url&gt;.proxy，很多教程让人设置的 https.proxy 不起作用
+        /// </summary>
+        public static bool IsIgnored(ProxyTool tool, string key)
+        {
+            return tool == ProxyTool.Git && string.Equals(key, "https.proxy", StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -120,6 +128,11 @@ namespace IP_UpdateTest.Core.TerminalProxy
         public bool SystemProxyEnabled { get; set; }
         public string SystemProxyServer { get; set; }
         public string PacUrl { get; set; }
+
+        /// <summary>
+        /// 系统代理的例外列表（ProxyOverride），如“localhost;127.*;10.*;*.corp.com;&lt;local&gt;”
+        /// </summary>
+        public string SystemProxyBypass { get; set; }
 
         /// <summary>
         /// 用户级环境变量（HKCU\Environment）中与代理相关的项
@@ -240,6 +253,16 @@ namespace IP_UpdateTest.Core.TerminalProxy
         /// </summary>
         public List<ProxyChange> ClearChanges { get; } = new List<ProxyChange>();
 
+        /// <summary>
+        /// 清除之后仍然指向失效地址的环境变量，如“HTTPS_PROXY = http://127.0.0.1:7890（系统级）”；清除能恢复正常时为 null
+        /// </summary>
+        public string StaleAfterClear { get; set; }
+
+        /// <summary>
+        /// 命令里写的 NO_PROXY：已有的值，没有时是一键设置会写入的值
+        /// </summary>
+        public string NoProxy { get; set; }
+
         public bool HasProblem
         {
             get { return Overall == CheckStatus.Fail || Overall == CheckStatus.Warning; }
@@ -283,15 +306,17 @@ namespace IP_UpdateTest.Core.TerminalProxy
     }
 
     /// <summary>
-    /// 一键设置之前的环境变量，清除时据此恢复，保存在 %APPDATA%\IPTool\terminal-proxy.json
+    /// 一键设置改过的项：改之前的值（清除时据此恢复），以及本程序写入的值（据此判断现在的值是不是本程序设的，
+    /// 用户之后自己改过的不动）。键为环境变量名，或“Git:http.proxy”这样的工具设置项。保存在 %APPDATA%\IPTool\terminal-proxy.json
     /// </summary>
     [System.Runtime.Serialization.DataContract]
     public sealed class TerminalProxyBackup
     {
         [System.Runtime.Serialization.DataMember] private Dictionary<string, string> previous;
+        [System.Runtime.Serialization.DataMember] private Dictionary<string, string> written;
 
         /// <summary>
-        /// 变量名 → 设置前的值（之前没有的不记录）
+        /// 键 → 本程序第一次改它之前的值（之前没有的不记录）
         /// </summary>
         public Dictionary<string, string> Previous
         {
@@ -299,13 +324,73 @@ namespace IP_UpdateTest.Core.TerminalProxy
         }
 
         /// <summary>
-        /// 本程序写入的变量名
+        /// 键 → 本程序最后写入的值
         /// </summary>
-        [System.Runtime.Serialization.DataMember] public List<string> Written { get; set; }
-
-        public bool Wrote(string name)
+        public Dictionary<string, string> Written
         {
-            return Written != null && Written.Any(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+            get { return written ?? (written = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)); }
+        }
+
+        public bool IsEmpty
+        {
+            get { return Previous.Count == 0 && Written.Count == 0; }
+        }
+
+        public static string KeyOf(ProxyChangeTarget target, string key)
+        {
+            return target == ProxyChangeTarget.Environment ? key : target + ":" + key;
+        }
+
+        /// <summary>
+        /// 现在的值是本程序写入的
+        /// </summary>
+        public bool Wrote(string key, string current)
+        {
+            string value = Find(Written, key);
+            return value != null && current != null && string.Equals(value.Trim().TrimEnd('/'), current.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+        }
+
+        public string PreviousOf(string key)
+        {
+            return Find(Previous, key);
+        }
+
+        /// <summary>
+        /// 写入前调用：第一次写（或用户在两次写入之间自己改过）时记下原来的值
+        /// </summary>
+        public void Record(string key, string oldValue, string newValue)
+        {
+            if (Find(Written, key) == null || !Wrote(key, oldValue))
+            {
+                Remove(Previous, key);
+                if (!string.IsNullOrWhiteSpace(oldValue)) Previous[key] = oldValue.Trim();
+            }
+            Remove(Written, key);
+            Written[key] = newValue;
+        }
+
+        /// <summary>
+        /// 清除（恢复原值）之后不再需要这一项
+        /// </summary>
+        public void Forget(string key)
+        {
+            Remove(Previous, key);
+            Remove(Written, key);
+        }
+
+        // 反序列化得到的字典区分大小写，按不区分大小写查找
+        private static string Find(Dictionary<string, string> values, string key)
+        {
+            foreach (KeyValuePair<string, string> pair in values)
+            {
+                if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase)) return string.IsNullOrWhiteSpace(pair.Value) ? null : pair.Value;
+            }
+            return null;
+        }
+
+        private static void Remove(Dictionary<string, string> values, string key)
+        {
+            foreach (string k in values.Keys.Where(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase)).ToList()) values.Remove(k);
         }
     }
 }

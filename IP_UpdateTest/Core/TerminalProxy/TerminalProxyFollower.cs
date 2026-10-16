@@ -21,12 +21,18 @@ namespace IP_UpdateTest.Core.TerminalProxy
         private readonly Timer timer;
         private readonly object gate = new object();
         private string lastState;
+        private string failedState;
         private bool disposed;
 
         /// <summary>
         /// 同步了环境变量时触发（在线程池线程上），参数为给用户看的说明
         /// </summary>
         public event Action<string> Synced;
+
+        /// <summary>
+        /// 同步失败时触发（同一状态只报一次，之后每次检查都会重试）
+        /// </summary>
+        public event Action<string> Failed;
 
         public TerminalProxyFollower()
         {
@@ -39,22 +45,53 @@ namespace IP_UpdateTest.Core.TerminalProxy
             {
                 if (disposed) return;
                 bool enabled;
-                string server, pac;
-                if (!ReadSystemProxy(out enabled, out server, out pac)) return;
+                string server, pac, bypass;
+                if (!ReadSystemProxy(out enabled, out server, out pac, out bypass)) return;
                 string state = enabled ? "on:" + server : string.IsNullOrEmpty(pac) ? "off" : "pac";
-                if (state == lastState) return;
-                lastState = state;
+                if (!ShouldSync(lastState, state, enabled))
+                {
+                    lastState = state;
+                    return;
+                }
 
                 TerminalProxySnapshot f = ReadEnvironment();
                 f.SystemProxyEnabled = enabled;
                 f.SystemProxyServer = server;
                 f.PacUrl = pac;
+                f.SystemProxyBypass = bypass;
                 List<ProxyChange> changes = Decide(f, TerminalProxyConfigurator.LoadBackup());
-                if (changes.Count == 0) return;
-                List<string> errors = TerminalProxyConfigurator.Apply(changes, !enabled);
-                if (errors.Count > 0 || Synced == null) return;
-                Synced(enabled ? "命令行代理已跟随系统代理改为 " + changes.First(c => c.NewValue != null).NewValue : "系统代理已关闭，命令行代理已随之清除");
+                if (changes.Count > 0)
+                {
+                    List<string> errors = TerminalProxyConfigurator.Apply(changes, !enabled);
+                    if (errors.Count > 0)
+                    {
+                        // 不记下这个状态，下次检查重试
+                        if (failedState != state) Failed?.Invoke("命令行代理没能跟随系统代理：" + errors[0]);
+                        failedState = state;
+                        return;
+                    }
+                    Synced?.Invoke(Message(changes, enabled));
+                }
+                lastState = state;
+                failedState = null;
             }
+        }
+
+        /// <summary>
+        /// 系统代理有变化时同步。第一次读到的状态只作为基准：开着就同步（换了端口也能跟上），
+        /// 关着则不动——可能是 TUN 模式或手动模式，用户刚用一键设置配好的命令行代理不能被清掉
+        /// </summary>
+        internal static bool ShouldSync(string lastState, string state, bool enabled)
+        {
+            if (state == lastState) return false;
+            return lastState != null || enabled;
+        }
+
+        internal static string Message(List<ProxyChange> changes, bool enabled)
+        {
+            if (!enabled) return "系统代理已关闭，命令行代理已随之清除";
+            ProxyChange proxy = changes.FirstOrDefault(c => c.NewValue != null && c.Key != TerminalProxyAnalyzer.NoProxy);
+            return proxy != null ? "命令行代理已跟随系统代理改为 " + proxy.NewValue : "命令行代理与系统代理一致，已补上 NO_PROXY";
         }
 
         /// <summary>
@@ -65,12 +102,13 @@ namespace IP_UpdateTest.Core.TerminalProxy
             var changes = new List<ProxyChange>();
             if (f.SystemProxyEnabled)
             {
-                string endpoint = ProxySettings.FirstEndpoint(f.SystemProxyServer);
+                bool socks;
+                string endpoint = TerminalProxyAnalyzer.SystemProxyEndpoint(f.SystemProxyServer, out socks);
                 string host;
                 int port;
                 if (!ProxySettings.TrySplit(endpoint, out host, out port)) return changes;
-                // 系统代理一定是 HTTP 代理（WinINet 只支持 HTTP，socks= 项除外，此时取第一个也是 http=）
-                var target = new ProxyCandidate { Host = host, Port = port, Http = true, IsSystemProxy = true };
+                // WinINet 的 http= / https= 都是 HTTP 代理；只设置了 socks= 时写 socks5h://
+                var target = new ProxyCandidate { Host = host, Port = port, Http = !socks, Socks5 = socks, IsSystemProxy = true };
                 changes.AddRange(TerminalProxyAnalyzer.Analyze(f, target, backup).ApplyChanges.Where(c => c.Target == ProxyChangeTarget.Environment));
             }
             else if (string.IsNullOrEmpty(f.PacUrl))
@@ -80,10 +118,10 @@ namespace IP_UpdateTest.Core.TerminalProxy
             return changes;
         }
 
-        private static bool ReadSystemProxy(out bool enabled, out string server, out string pac)
+        private static bool ReadSystemProxy(out bool enabled, out string server, out string pac, out string bypass)
         {
             enabled = false;
-            server = pac = null;
+            server = pac = bypass = null;
             try
             {
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(InternetSettingsKey))
@@ -92,6 +130,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
                     server = (key.GetValue("ProxyServer") as string ?? "").Trim();
                     enabled = key.GetValue("ProxyEnable") is int flag && flag != 0 && server.Length > 0;
                     pac = (key.GetValue("AutoConfigURL") as string ?? "").Trim();
+                    bypass = key.GetValue("ProxyOverride") as string;
                     return true;
                 }
             }
@@ -101,26 +140,14 @@ namespace IP_UpdateTest.Core.TerminalProxy
             }
         }
 
+        /// <summary>
+        /// 用户级和系统级都要读：系统级已有 NO_PROXY 时不能再写一个用户级的把它盖住
+        /// </summary>
         private static TerminalProxySnapshot ReadEnvironment()
         {
             var f = new TerminalProxySnapshot { GeneratedAt = DateTime.Now };
-            try
-            {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey("Environment"))
-                {
-                    if (key != null)
-                    {
-                        foreach (string name in TerminalProxyAnalyzer.AllVariables)
-                        {
-                            string value = key.GetValue(name) as string;
-                            if (!string.IsNullOrWhiteSpace(value)) f.UserEnvironment[name] = value.Trim();
-                        }
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is SecurityException || ex is IOException || ex is UnauthorizedAccessException)
-            {
-            }
+            TerminalProxyScanner.ReadEnvironment(Registry.CurrentUser, TerminalProxyScanner.UserEnvironmentKey, f.UserEnvironment);
+            TerminalProxyScanner.ReadEnvironment(Registry.LocalMachine, TerminalProxyScanner.MachineEnvironmentKey, f.MachineEnvironment);
             return f;
         }
 

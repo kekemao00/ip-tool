@@ -212,7 +212,7 @@ namespace IP_UpdateTest
             tips.SetToolTip(btnDnsBenchmark, "测试各公共 DNS 的响应速度并选择");
             tips.SetToolTip(btnDiagnose, "分层检测网络：网卡、路由器、外网、DNS、代理 / VPN、UDP");
             tips.SetToolTip(btnReport, "网卡信息报表，可复制或导出");
-            tips.SetToolTip(btnTerminalProxy, "检查并一键设置命令行（cmd、PowerShell、git、curl）的代理");
+            tips.SetToolTip(btnTerminalProxy, "检查并一键设置命令行（git、curl、npm 等）的代理");
             tips.SetToolTip(btnRevert, "恢复为网卡当前的配置（Esc）");
             tips.SetToolTip(btnApply, "把以上配置应用到所选网卡（Enter）");
         }

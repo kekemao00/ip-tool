@@ -75,11 +75,18 @@ namespace IP_UpdateTest.Core.TerminalProxy
         }
 
         /// <summary>
-        /// 代理对 CONNECT 的应答以“HTTP/”开头（200 之外的状态也说明它是 HTTP 代理）
+        /// 代理对 CONNECT 的应答：200 隧道已建立、407 要认证、502 / 503 / 504 代理连不上目标。
+        /// 网页界面和控制接口（如 v2rayA 的 2017、Clash 的 9090）会回 400 / 401 / 404 / 405，不算代理
         /// </summary>
         internal static bool IsHttpResponse(byte[] data)
         {
-            return data != null && data.Length >= 5 && Encoding.ASCII.GetString(data, 0, 5) == "HTTP/";
+            if (data == null || data.Length < 12) return false;
+            string head = Encoding.ASCII.GetString(data, 0, 12); // “HTTP/1.1 200”
+            int status;
+            if (!head.StartsWith("HTTP/1.", StringComparison.Ordinal) || head[8] != ' '
+                || !int.TryParse(head.Substring(9, 3), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out status))
+                return false;
+            return status == 200 || status == 407 || status == 502 || status == 503 || status == 504;
         }
 
         /// <summary>
@@ -157,40 +164,54 @@ namespace IP_UpdateTest.Core.TerminalProxy
         #region 监听端口表
 
         private const int AfInet = 2;
+        private const int AfInet6 = 23;
         private const int TcpTableOwnerPidListener = 3;
 
         [DllImport("iphlpapi.dll", SetLastError = true)]
         private static extern uint GetExtendedTcpTable(IntPtr table, ref int size, bool order, int family, int tableClass, uint reserved);
 
         /// <summary>
-        /// 本机所有监听中的 IPv4 TCP 端口；读不到时返回空表
+        /// 本机所有监听中的 TCP 端口（IPv4 和 IPv6）；读不到时返回空表。
+        /// mihomo、xray 等 Go 程序“允许局域网”时监听 [::]，这种双栈端口只出现在 IPv6 表里
         /// </summary>
         public static List<PortListener> Listeners()
         {
             var list = new List<PortListener>();
+            // MIB_TCPROW_OWNER_PID（24 字节）：state、localAddr、localPort、remoteAddr、remotePort、owningPid，各 4 字节
+            ReadTable(list, AfInet, 24, row => new PortListener
+            {
+                Address = new IPAddress((uint)Marshal.ReadInt32(row, 4)),
+                Port = NetworkPort((uint)Marshal.ReadInt32(row, 8)),
+                ProcessId = Marshal.ReadInt32(row, 20)
+            });
+            // MIB_TCP6ROW_OWNER_PID（56 字节）：localAddr[16]、localScopeId、localPort、remoteAddr[16]、remoteScopeId、remotePort、state、owningPid
+            ReadTable(list, AfInet6, 56, row =>
+            {
+                var address = new byte[16];
+                Marshal.Copy(row, address, 0, 16);
+                return new PortListener
+                {
+                    Address = new IPAddress(address),
+                    Port = NetworkPort((uint)Marshal.ReadInt32(row, 20)),
+                    ProcessId = Marshal.ReadInt32(row, 52)
+                };
+            });
+            return list;
+        }
+
+        private static void ReadTable(List<PortListener> list, int family, int rowSize, Func<IntPtr, PortListener> read)
+        {
             int size = 0;
             try
             {
-                GetExtendedTcpTable(IntPtr.Zero, ref size, false, AfInet, TcpTableOwnerPidListener, 0);
-                if (size <= 0) return list;
+                GetExtendedTcpTable(IntPtr.Zero, ref size, false, family, TcpTableOwnerPidListener, 0);
+                if (size <= 0) return;
                 IntPtr buffer = Marshal.AllocHGlobal(size);
                 try
                 {
-                    if (GetExtendedTcpTable(buffer, ref size, false, AfInet, TcpTableOwnerPidListener, 0) != 0) return list;
+                    if (GetExtendedTcpTable(buffer, ref size, false, family, TcpTableOwnerPidListener, 0) != 0) return;
                     int count = Marshal.ReadInt32(buffer);
-                    // MIB_TCPROW_OWNER_PID：state、localAddr、localPort、remoteAddr、remotePort、owningPid，各 4 字节
-                    for (int i = 0; i < count; i++)
-                    {
-                        IntPtr row = buffer + 4 + i * 24;
-                        uint address = (uint)Marshal.ReadInt32(row, 4);
-                        uint port = (uint)Marshal.ReadInt32(row, 8);
-                        list.Add(new PortListener
-                        {
-                            Address = new IPAddress(address),
-                            Port = NetworkPort(port),
-                            ProcessId = Marshal.ReadInt32(row, 20)
-                        });
-                    }
+                    for (int i = 0; i < count; i++) list.Add(read(buffer + 4 + i * rowSize));
                 }
                 finally
                 {
@@ -200,7 +221,6 @@ namespace IP_UpdateTest.Core.TerminalProxy
             catch (Exception ex) when (ex is DllNotFoundException || ex is EntryPointNotFoundException)
             {
             }
-            return list;
         }
 
         /// <summary>

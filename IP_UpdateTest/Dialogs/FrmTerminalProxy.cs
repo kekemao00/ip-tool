@@ -5,13 +5,14 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using IP_UpdateTest.Core;
+using IP_UpdateTest.Core.Diagnosis;
 using IP_UpdateTest.Core.TerminalProxy;
 using IP_UpdateTest.Ui;
 
 namespace IP_UpdateTest
 {
     /// <summary>
-    /// 终端代理：v2rayN、Clash 等只设置系统代理，cmd、PowerShell、git、curl 不会跟着走。
+    /// 终端代理：v2rayN、Clash 等只设置系统代理，在 cmd、PowerShell 里运行的 git、curl、npm 等只认环境变量，不会跟着走。
     /// 这里一键检查各处的代理设置，一键设置或清除，并给出让已打开的终端立即生效的命令
     /// </summary>
     public class FrmTerminalProxy : ThemedForm
@@ -19,6 +20,7 @@ namespace IP_UpdateTest
         private const string ApplyHint = "一键设置写入用户环境变量，新开的终端自动生效；VS Code 等已打开的程序需要重启。";
         private const string ClearHint = "清除只删除指向本机代理的设置，新开的终端恢复直连；已打开的终端粘贴上面的命令即可。";
         private const string IdleHint = "启动代理软件后按 F5 或点“重新检测”。";
+        private const string ManualHint = "系统级变量和不指向本机的设置“清除”不会改；已打开的终端粘贴上面的命令可先临时清掉。";
 
         private readonly AppSettings settings;
         private readonly Action<bool> setFollow;
@@ -37,6 +39,7 @@ namespace IP_UpdateTest
         private TerminalProxyReport report;
         private bool running;
         private bool binding;
+        private bool refreshPending;
 
         /// <param name="setFollow">开关“跟随系统代理”（由主窗口启停后台同步）</param>
         public FrmTerminalProxy(AppSettings settings, Action<bool> setFollow) : this(settings, setFollow, null)
@@ -66,15 +69,15 @@ namespace IP_UpdateTest
             InkToolTip tips = InkToolTip.Shared;
             tips.SetToolTip(btnCopy, "复制命令（Ctrl+C）");
             tips.SetToolTip(chkFollow, "代理软件开关系统代理或换端口时，自动设置或清除命令行代理。需要 IP Tool 在托盘运行");
-            tips.SetToolTip(btnClear, "删除指向本机代理的环境变量和 Git / npm / pip 代理项，恢复原来的设置");
             tips.SetToolTip(cbxProxy, "一键设置使用的代理地址");
 
-            pnlSnippet.Controls.AddRange(new Control[] { cbxProxy, segShell, code, btnCopy });
+            // 复制按钮放在代码块里：透明背景只会透出父控件，放在卡片上会露出一块白底
+            code.Controls.Add(btnCopy);
+            pnlSnippet.Controls.AddRange(new Control[] { cbxProxy, segShell, code });
             Controls.AddRange(new Control[] { view, pnlSnippet, btnRescan, chkFollow, btnClear, btnApply });
             int tab = 0;
-            foreach (Control c in new Control[] { view, pnlSnippet, cbxProxy, segShell, btnCopy, btnRescan, chkFollow, btnClear, btnApply })
+            foreach (Control c in new Control[] { view, pnlSnippet, cbxProxy, segShell, code, btnRescan, chkFollow, btnClear, btnApply })
                 c.TabIndex = tab++;
-            btnCopy.BringToFront();
 
             cbxProxy.SelectedIndexChanged += async (s, e) => await ProxySelectedAsync();
             segShell.SelectedIndexChanged += (s, e) => UpdateSnippet();
@@ -133,7 +136,7 @@ namespace IP_UpdateTest
             cbxProxy.Place(new Rectangle(pad, pad - P(2), segShell.Left - P(12) - pad, P(40)));
             code.SetBounds(pad, pad + P(36) + P(12), inner, P(82));
             int copy = P(32);
-            btnCopy.SetBounds(code.Right - P(6) - copy, code.Top + P(6), copy, copy);
+            btnCopy.SetBounds(code.Width - P(6) - copy, P(6), copy, copy);
 
             view.SetBounds(gutter, top, width, pnlSnippet.Top - P(12) - top);
 
@@ -159,6 +162,7 @@ namespace IP_UpdateTest
             get
             {
                 if (report == null || report.Target != null) return ApplyHint;
+                if (report.StaleAfterClear != null) return ManualHint;
                 return report.ClearChanges.Count > 0 ? ClearHint : IdleHint;
             }
         }
@@ -197,6 +201,12 @@ namespace IP_UpdateTest
                 btnRescan.PerformClick();
                 return true;
             }
+            // 打开着的确认框自己处理 Esc
+            if (keyData == Keys.Escape && !HasSheet)
+            {
+                Close();
+                return true;
+            }
             return base.ProcessCmdKey(ref msg, keyData);
         }
 
@@ -209,6 +219,7 @@ namespace IP_UpdateTest
         {
             if (running) return;
             running = true;
+            refreshPending = false;
             UpdateButtons();
             if (full)
             {
@@ -217,7 +228,8 @@ namespace IP_UpdateTest
             }
             try
             {
-                TerminalProxySnapshot result = await TerminalProxyScanner.ScanAsync();
+                // 用户选的不是默认代理时也一并实测，不然重新检测后它的结果就丢了
+                TerminalProxySnapshot result = await TerminalProxyScanner.ScanAsync((cbxProxy.SelectedItem as ProxyCandidate)?.Endpoint);
                 if (IsDisposed) return;
                 snapshot = result;
                 BindCandidates();
@@ -227,6 +239,10 @@ namespace IP_UpdateTest
             catch (Exception ex) when (ex is System.Net.Sockets.SocketException || ex is InvalidOperationException || ex is System.ComponentModel.Win32Exception)
             {
                 if (IsDisposed) return;
+                // 不再沿用上一次的结果：按钮和命令都要跟着失效
+                snapshot = null;
+                report = null;
+                UpdateSnippet();
                 view.ShowMessage("检测失败：" + ex.Message, false);
                 btnRescan.Fail("检测失败");
             }
@@ -238,6 +254,22 @@ namespace IP_UpdateTest
                     UpdateButtons();
                 }
             }
+            // 检测期间后台跟随又改了设置
+            if (refreshPending && !IsDisposed) await ScanAsync(false);
+        }
+
+        /// <summary>
+        /// 后台跟随系统代理改了环境变量后原地刷新
+        /// </summary>
+        internal async void RefreshAfterSync()
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            if (running)
+            {
+                refreshPending = true;
+                return;
+            }
+            await ScanAsync(false);
         }
 
         private void BindCandidates()
@@ -247,7 +279,6 @@ namespace IP_UpdateTest
                 ?? TerminalProxyAnalyzer.PickTarget(snapshot);
             binding = true;
             cbxProxy.SetItems(snapshot.Candidates.Cast<object>(), pick == null ? -1 : snapshot.Candidates.IndexOf(pick));
-            cbxProxy.Enabled = snapshot.Candidates.Count > 1;
             binding = false;
         }
 
@@ -261,7 +292,7 @@ namespace IP_UpdateTest
 
         private async Task ProxySelectedAsync()
         {
-            if (binding || snapshot == null) return;
+            if (binding || running || snapshot == null) return;
             var target = cbxProxy.SelectedItem as ProxyCandidate;
             Analyze(false);
             if (target == null || !target.Http || snapshot.Tunnels.ContainsKey(target.Endpoint)) return;
@@ -279,21 +310,29 @@ namespace IP_UpdateTest
             bool ready = !running && report != null;
             bool hasTarget = report != null && report.Target != null;
             int applyCount = report == null ? 0 : report.ApplyChanges.Count;
+            int clearCount = report == null ? 0 : report.ClearChanges.Count;
+            // 还有一键设置改不了的问题（如 pip 不支持 SOCKS）时不能说“已是最新”
+            bool manual = hasTarget && applyCount == 0 && report.Rows.Any(r => (r.Key == "env" || r.Key == "git" || r.Key == "npm" || r.Key == "pip")
+                && (r.Status == CheckStatus.Fail || r.Status == CheckStatus.Warning));
             btnApply.Visible = hasTarget || report == null;
             btnApply.Enabled = ready && applyCount > 0;
-            btnApply.Text = report != null && hasTarget && applyCount == 0 ? "已是最新" : "一键设置";
-            btnClear.Enabled = ready && report.ClearChanges.Count > 0;
+            btnApply.Text = hasTarget && applyCount == 0 && !manual ? "已是最新" : "一键设置";
+            btnClear.Enabled = ready && clearCount > 0;
             btnClear.Kind = btnApply.Visible ? ButtonKind.Secondary : ButtonKind.Primary;
             btnRescan.Enabled = !running;
-            InkToolTip.Shared.SetToolTip(btnApply, applyCount > 0 ? "将修改：\n" + string.Join("\n", report.ApplyChanges.Select(c => c.ToString())) : "各处已指向当前代理");
+            cbxProxy.Enabled = !running && snapshot != null && snapshot.Candidates.Count > 1;
+            InkToolTip.Shared.SetToolTip(btnApply, applyCount > 0 ? "将修改：\n" + string.Join("\n", report.ApplyChanges.Select(c => c.ToString()))
+                : manual ? "剩下的问题需要手动处理，见上方说明" : "各处已指向当前代理");
+            InkToolTip.Shared.SetToolTip(btnClear, clearCount > 0 ? "将修改：\n" + string.Join("\n", report.ClearChanges.Select(c => c.ToString()))
+                : "删除指向本机代理的环境变量和 Git / npm / pip 代理项，恢复原来的设置");
             PerformLayout();
         }
 
         private void UpdateSnippet()
         {
             var shell = (ShellKind)Math.Max(0, segShell.SelectedIndex);
-            if (report != null && report.Target != null) code.Text = ShellSnippets.Build(shell, report.Target.Url);
-            else if (report != null && report.ClearChanges.Count > 0) code.Text = ShellSnippets.Build(shell, null);
+            if (report != null && report.Target != null) code.Text = ShellSnippets.Build(shell, report.Target.Url, report.NoProxy);
+            else if (report != null && (report.ClearChanges.Count > 0 || report.StaleAfterClear != null)) code.Text = ShellSnippets.Build(shell, null);
             else code.Text = "";
             btnCopy.Visible = !string.IsNullOrEmpty(code.Text);
             pnlSnippet.Invalidate();
@@ -328,9 +367,10 @@ namespace IP_UpdateTest
             if (errors.Count == 0)
             {
                 button.Succeed();
-                Notify(NoticeKind.Success, clearing
-                    ? $"已清除 {changes.Count} 项，命令行恢复直连"
-                    : $"已设置 {changes.Count} 项，新开的终端即可走代理");
+                Notify(NoticeKind.Success, !clearing ? $"已设置 {changes.Count} 项，新开的终端即可走代理"
+                    : report.StaleAfterClear != null ? $"已清除 {changes.Count} 项；{report.StaleAfterClear} 还需要手动删除"
+                    : changes.Any(c => c.NewValue != null) ? $"已清除 {changes.Count} 项，恢复了原来的代理设置"
+                    : $"已清除 {changes.Count} 项，新开的终端恢复直连");
             }
             else
             {

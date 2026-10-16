@@ -10,7 +10,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
     public static class ConfigLines
     {
         /// <summary>
-        /// 读取各键的值（同名取最后一个，与 npm、pip 一致）；注释行跳过
+        /// 读取各键的值（同名取最后一个，与 npm、pip 一致）；注释行跳过。
+        /// 值为 null / false（npm config set proxy null，npm 关闭代理的写法）或为空时视为没有设置
         /// </summary>
         public static Dictionary<string, string> Read(string text, IEnumerable<string> keys)
         {
@@ -19,7 +20,11 @@ namespace IP_UpdateTest.Core.TerminalProxy
             foreach (string line in Split(text))
             {
                 string key, value;
-                if (TryParse(line, out key, out value) && wanted.Contains(key) && value.Length > 0) values[key] = value;
+                if (!TryParse(line, out key, out value) || !wanted.Contains(key)) continue;
+                if (value.Length == 0 || string.Equals(value, "null", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "false", StringComparison.OrdinalIgnoreCase))
+                    values.Remove(key);
+                else
+                    values[key] = value;
             }
             return values;
         }

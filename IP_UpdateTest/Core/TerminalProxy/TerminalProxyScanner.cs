@@ -89,8 +89,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
     {
         private const string InternetSettingsKey = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
         private const string WinHttpKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\Connections";
-        private const string MachineEnvironmentKey = @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
-        private const string UserEnvironmentKey = "Environment";
+        internal const string MachineEnvironmentKey = @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
+        internal const string UserEnvironmentKey = "Environment";
 
         public static string NpmrcPath
         {
@@ -102,7 +102,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "pip", "pip.ini"); }
         }
 
-        public static async Task<TerminalProxySnapshot> ScanAsync()
+        /// <param name="selected">用户在窗口里选的代理（host:port），和默认的代理一起实测</param>
+        public static async Task<TerminalProxySnapshot> ScanAsync(string selected = null)
         {
             var f = new TerminalProxySnapshot { GeneratedAt = DateTime.Now };
             Dictionary<int, string> owners = null;
@@ -129,11 +130,13 @@ namespace IP_UpdateTest.Core.TerminalProxy
             }
             endpoints.AddRange(f.Tools.SelectMany(t => t.Values.Values).Select(ProxySettings.UrlEndpoint));
             endpoints.Add(ProxySettings.FirstEndpoint(f.WinHttpProxy));
-            await Task.WhenAll(endpoints.Where(e => e != null && !f.Reachable.ContainsKey(e)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
-                .Select(async e => f.Reachable[e] = await Connect(e)));
+            List<string> pending = endpoints.Where(e => e != null && !f.Reachable.ContainsKey(e)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            bool[] reachable = await Task.WhenAll(pending.Select(Connect));
+            for (int i = 0; i < pending.Count; i++) f.Reachable[pending[i]] = reachable[i];
 
             ProxyCandidate target = TerminalProxyAnalyzer.PickTarget(f);
-            if (target != null) await TestTunnelAsync(f, target);
+            ProxyCandidate chosen = f.Candidates.FirstOrDefault(c => TerminalProxyAnalyzer.SameEndpoint(c.Endpoint, selected));
+            await Task.WhenAll(new[] { target, chosen }.Where(c => c != null).Distinct().Select(c => TestTunnelAsync(f, c)));
             return f;
         }
 
@@ -142,8 +145,16 @@ namespace IP_UpdateTest.Core.TerminalProxy
         /// </summary>
         public static async Task TestTunnelAsync(TerminalProxySnapshot f, ProxyCandidate target)
         {
-            if (!target.Http || f.Tunnels.ContainsKey(target.Endpoint)) return;
-            f.Tunnels[target.Endpoint] = await ProxyPortProbe.TunnelAsync(target.Url);
+            if (!target.Http) return;
+            lock (f.Tunnels)
+            {
+                if (f.Tunnels.ContainsKey(target.Endpoint)) return;
+            }
+            long? ms = await ProxyPortProbe.TunnelAsync(target.Url);
+            lock (f.Tunnels)
+            {
+                f.Tunnels[target.Endpoint] = ms;
+            }
         }
 
         private static async Task<bool> Connect(string endpoint)
@@ -214,7 +225,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
             bool haveTable = listeners.Count > 0;
             foreach (PortListener l in listeners)
             {
-                if (!IPAddress.IsLoopback(l.Address) && !l.Address.Equals(IPAddress.Any)) continue;
+                // 本机能连的：127.x / ::1，以及 0.0.0.0 / [::]（允许局域网连接时）
+                if (!IPAddress.IsLoopback(l.Address) && !l.Address.Equals(IPAddress.Any) && !l.Address.Equals(IPAddress.IPv6Any)) continue;
                 string owner;
                 if (owners.TryGetValue(l.ProcessId, out owner)) ports[l.Port] = owner;
                 else if (ProxyClients.WellKnownPorts.Contains(l.Port) && !ports.ContainsKey(l.Port)) ports[l.Port] = null;
@@ -222,6 +234,15 @@ namespace IP_UpdateTest.Core.TerminalProxy
             if (!haveTable)
             {
                 foreach (int port in ProxyClients.WellKnownPorts) ports[port] = null;
+            }
+            // 环境变量指向的本机端口也探测：端口不常见、进程不认识时也能认出代理
+            foreach (string name in TerminalProxyAnalyzer.ProxyVariables)
+            {
+                string url = f.EffectiveEnvironment(name);
+                string host;
+                int port;
+                if (url != null && TerminalProxyAnalyzer.IsLoopback(url) && ProxySettings.TrySplit(ProxySettings.UrlEndpoint(url), out host, out port) && !ports.ContainsKey(port))
+                    ports[port] = null;
             }
 
             // 系统代理（含局域网里的代理服务器）
@@ -274,6 +295,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
                     f.SystemProxyServer = f.SystemProxyEnabled ? server.Trim() : null;
                     string pac = key.GetValue("AutoConfigURL") as string;
                     f.PacUrl = string.IsNullOrWhiteSpace(pac) ? null : pac.Trim();
+                    string bypass = key.GetValue("ProxyOverride") as string;
+                    f.SystemProxyBypass = string.IsNullOrWhiteSpace(bypass) ? null : bypass.Trim();
                 }
             }
             catch (Exception ex) when (ex is SecurityException || ex is IOException || ex is UnauthorizedAccessException)
@@ -281,7 +304,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
             }
         }
 
-        private static void ReadEnvironment(RegistryKey root, string path, Dictionary<string, string> values)
+        internal static void ReadEnvironment(RegistryKey root, string path, Dictionary<string, string> values)
         {
             try
             {
@@ -317,14 +340,22 @@ namespace IP_UpdateTest.Core.TerminalProxy
 
         private static void ReadTools(TerminalProxySnapshot f)
         {
+            // http.proxy、https.proxy，以及只对某个网站生效的 http.https://github.com.proxy；返回 1 表示一项都没有
             var git = new ToolProxySetting { Tool = ProxyTool.Git };
-            foreach (string key in ToolProxySetting.KeysOf(ProxyTool.Git))
+            int exitCode;
+            string output = GitConfig(out exitCode, "--global", "--get-regexp", @"^https?\..*proxy$");
+            git.Installed = exitCode >= 0;
+            if (exitCode == 0 && output != null)
             {
-                int exitCode;
-                string output = GitConfig(out exitCode, "--global", "--get", key);
-                if (exitCode < 0) break;
-                git.Installed = true;
-                if (exitCode == 0 && !string.IsNullOrWhiteSpace(output)) git.Values[key] = output.Trim();
+                foreach (string line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    int space = line.IndexOf(' ');
+                    if (space <= 0) continue;
+                    string value = line.Substring(space + 1).Trim();
+                    // 同一项写了多次时 Git 取最后一个
+                    if (value.Length > 0) git.Values[line.Substring(0, space)] = value;
+                    else git.Values.Remove(line.Substring(0, space));
+                }
             }
             f.Tools.Add(git);
 
@@ -341,7 +372,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
         {
             try
             {
-                return File.Exists(path) ? ConfigLines.Read(File.ReadAllText(path), keys) : new Dictionary<string, string>();
+                System.Text.Encoding encoding;
+                return File.Exists(path) ? ConfigLines.Read(TerminalProxyConfigurator.ReadText(File.ReadAllBytes(path), out encoding), keys) : new Dictionary<string, string>();
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is SecurityException)
             {
@@ -407,7 +439,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
 
         private static string Quote(string arg)
         {
-            return arg.IndexOfAny(new[] { ' ', '"' }) >= 0 ? "\"" + arg.Replace("\"", "\\\"") + "\"" : arg;
+            return arg.IndexOfAny(new[] { ' ', '"', '*', '?' }) >= 0 ? "\"" + arg.Replace("\"", "\\\"") + "\"" : arg;
         }
     }
 }

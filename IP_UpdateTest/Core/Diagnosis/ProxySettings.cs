@@ -60,9 +60,19 @@ namespace IP_UpdateTest.Core.Diagnosis
                 // 读不到时按未设置处理
             }
 
+            // 读注册表里的用户级、系统级变量（新开的终端拿到的值），不读本进程的：它在程序启动时就定了，
+            // 之后在“终端代理”里一键设置或清除都不会反映到这里
             foreach (string name in EnvironmentVariables)
             {
-                string value = Environment.GetEnvironmentVariable(name);
+                string value = null;
+                try
+                {
+                    value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+                    if (string.IsNullOrWhiteSpace(value)) value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
+                }
+                catch (SecurityException)
+                {
+                }
                 if (!string.IsNullOrWhiteSpace(value))
                     facts.Add(new ProxyFact { Source = "环境变量 " + name, Value = value.Trim(), Endpoint = UrlEndpoint(value) });
             }

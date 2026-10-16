@@ -156,6 +156,11 @@ namespace IP_UpdateTest.Ui
                 enteredAt = IsHandleCreated ? Motion.Now : double.NegativeInfinity;
                 ScrollTo(0, false);
             }
+            else if (ScrollTarget > MaxScroll)
+            {
+                // 刷新后内容可能变短，不能停在内容末尾之后
+                ScrollTo(MaxScroll, false);
+            }
             Invalidate();
         }
 

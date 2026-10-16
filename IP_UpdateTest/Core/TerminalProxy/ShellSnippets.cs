@@ -26,7 +26,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 case ShellKind.PowerShell:
                     if (url == null)
                     {
-                        lines.Add("Remove-Item Env:HTTP_PROXY, Env:HTTPS_PROXY, Env:ALL_PROXY -ErrorAction SilentlyContinue");
+                        lines.Add("Remove-Item Env:HTTP_PROXY, Env:HTTPS_PROXY -ErrorAction SilentlyContinue");
+                        lines.Add("Remove-Item Env:ALL_PROXY -ErrorAction SilentlyContinue");
                         break;
                     }
                     lines.Add($"$env:HTTP_PROXY = \"{url}\"");
@@ -48,15 +49,17 @@ namespace IP_UpdateTest.Core.TerminalProxy
                     break;
 
                 default:
-                    // Git Bash、WSL 里的程序区分大小写，curl 只认小写的 http_proxy
+                    // Git Bash 里的程序区分大小写，curl 只认小写的 http_proxy。
+                    // 不标 WSL：WSL2 默认的 NAT 网络里 127.0.0.1 是虚拟机自己，连不到 Windows 上的代理
                     if (url == null)
                     {
                         lines.Add("unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY");
                         break;
                     }
-                    lines.Add($"export http_proxy={url} https_proxy={url}");
-                    lines.Add("export HTTP_PROXY=$http_proxy HTTPS_PROXY=$https_proxy");
-                    lines.Add($"export no_proxy={noProxy} NO_PROXY={noProxy}");
+                    // 同一条 export 里的 $变量 在赋值前就展开了，所以分成几条
+                    lines.Add($"export http_proxy={url}");
+                    lines.Add("export https_proxy=$http_proxy HTTP_PROXY=$http_proxy HTTPS_PROXY=$http_proxy");
+                    lines.Add($"export no_proxy={noProxy}; export NO_PROXY=$no_proxy");
                     break;
             }
             var text = new StringBuilder();
@@ -74,7 +77,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
             {
                 case ShellKind.PowerShell: return "PowerShell";
                 case ShellKind.Cmd: return "cmd";
-                default: return "Git Bash / WSL";
+                default: return "Git Bash";
             }
         }
     }

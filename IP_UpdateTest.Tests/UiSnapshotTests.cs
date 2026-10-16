@@ -10,6 +10,7 @@ using System.Threading;
 using System.Windows.Forms;
 using IP_UpdateTest.Core;
 using IP_UpdateTest.Core.Diagnosis;
+using IP_UpdateTest.Core.TerminalProxy;
 using IP_UpdateTest.Core.Update;
 using IP_UpdateTest.Ui;
 using Xunit;
@@ -64,6 +65,7 @@ namespace IP_UpdateTest.Tests
                 RenderProfiles(adapters);
                 RenderDnsBenchmark();
                 RenderDiagnosis();
+                RenderTerminalProxy();
                 RenderInfo();
             });
         }
@@ -189,6 +191,38 @@ namespace IP_UpdateTest.Tests
             {
                 Open(form);
                 Save(form, "diagnosis", 1.5);
+            }
+        }
+
+        private void RenderTerminalProxy()
+        {
+            // v2rayN 只开了系统代理，Git 还留着以前 Clash 的端口
+            var f = new TerminalProxySnapshot { GeneratedAt = new DateTime(2026, 10, 16, 9, 30, 0), SystemProxyEnabled = true, SystemProxyServer = "127.0.0.1:10809" };
+            f.Clients.Add("v2rayN");
+            f.Candidates.Add(new ProxyCandidate { Port = 10809, Http = true, Owner = "v2rayN", IsSystemProxy = true });
+            f.Candidates.Add(new ProxyCandidate { Port = 10808, Socks5 = true, Owner = "v2rayN" });
+            f.Reachable["127.0.0.1:10809"] = true;
+            f.Reachable["127.0.0.1:7890"] = false;
+            f.Tunnels["127.0.0.1:10809"] = 186;
+            var git = new ToolProxySetting { Tool = ProxyTool.Git, Installed = true };
+            git.Values["http.proxy"] = "http://127.0.0.1:7890";
+            f.Tools.Add(git);
+            f.Tools.Add(new ToolProxySetting { Tool = ProxyTool.Npm, Installed = true });
+            f.Tools.Add(new ToolProxySetting { Tool = ProxyTool.Pip, Installed = true });
+            using (var form = new FrmTerminalProxy(new AppSettings(), null, f))
+            {
+                Open(form);
+                Save(form, "terminal-proxy", 1.5);
+            }
+
+            // 已全部设置好
+            f.UserEnvironment["HTTP_PROXY"] = f.UserEnvironment["HTTPS_PROXY"] = "http://127.0.0.1:10809";
+            f.UserEnvironment["NO_PROXY"] = TerminalProxyAnalyzer.DefaultNoProxy;
+            git.Values["http.proxy"] = "http://127.0.0.1:10809";
+            using (var form = new FrmTerminalProxy(new AppSettings { FollowSystemProxy = true }, null, f))
+            {
+                Open(form);
+                Save(form, "terminal-proxy-ok", 1.5);
             }
         }
 

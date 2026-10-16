@@ -56,7 +56,10 @@ namespace IP_UpdateTest.Ui
         Minus,
         ArrowRight,
         ArrowUpCircle,
-        Sparkles
+        Sparkles,
+        Terminal,
+        GitBranch,
+        Package
     }
 
     /// <summary>
@@ -112,6 +115,9 @@ namespace IP_UpdateTest.Ui
             { Glyph.ArrowRight, new[] { "M5 12h14", "m12 5 7 7-7 7" } },
             { Glyph.ArrowUpCircle, new[] { "circle 12 12 10", "m16 12-4-4-4 4", "M12 16V8" } },
             { Glyph.Sparkles, new[] { "M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z", "M20 3v4", "M22 5h-4" } },
+            { Glyph.Terminal, new[] { "rect 2 4 20 16 2", "m6 9 3 3-3 3", "M12 15h6" } },
+            { Glyph.GitBranch, new[] { "M6 3v12", "circle 18 6 3", "circle 6 18 3", "M18 9a9 9 0 0 1-9 9" } },
+            { Glyph.Package, new[] { "M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z", "M12 22V12", "m3.3 7 7.7 4.73a2 2 0 0 0 2 0L20.7 7", "m7.5 4.27 9 5.15" } },
             { Glyph.Link, new[] { "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71", "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" } }
         };
 

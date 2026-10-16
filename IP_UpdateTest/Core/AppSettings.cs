@@ -43,6 +43,11 @@ namespace IP_UpdateTest.Core
         /// </summary>
         [DataMember] public bool TrayHintShown { get; set; }
 
+        /// <summary>
+        /// 命令行代理跟随系统代理（程序在后台运行时生效）
+        /// </summary>
+        [DataMember] public bool FollowSystemProxy { get; set; }
+
         public List<DnsPreset> CustomDnsPresets
         {
             get { return customDnsPresets ?? (customDnsPresets = new List<DnsPreset>()); }

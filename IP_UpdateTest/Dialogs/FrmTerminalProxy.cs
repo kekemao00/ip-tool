@@ -16,7 +16,9 @@ namespace IP_UpdateTest
     /// </summary>
     public class FrmTerminalProxy : ThemedForm
     {
-        private const string Hint = "一键设置写入用户环境变量，新开的终端自动生效；VS Code 等已打开的程序需要重启。";
+        private const string ApplyHint = "一键设置写入用户环境变量，新开的终端自动生效；VS Code 等已打开的程序需要重启。";
+        private const string ClearHint = "清除只删除指向本机代理的设置，新开的终端恢复直连；已打开的终端粘贴上面的命令即可。";
+        private const string IdleHint = "启动代理软件后按 F5 或点“重新检测”。";
 
         private readonly AppSettings settings;
         private readonly Action<bool> setFollow;
@@ -147,6 +149,18 @@ namespace IP_UpdateTest
             int rescanW = Math.Max(P(100), btnRescan.PreferredWidth);
             btnRescan.SetBounds(gutter, footerY + (footerH - h) / 2, rescanW, h);
             chkFollow.SetBounds(btnRescan.Right + P(16), footerY + (footerH - P(26)) / 2, chkFollow.PreferredWidth, P(26));
+        }
+
+        /// <summary>
+        /// 命令卡片底部的说明，随当前能做的操作变化
+        /// </summary>
+        private string Hint
+        {
+            get
+            {
+                if (report == null || report.Target != null) return ApplyHint;
+                return report.ClearChanges.Count > 0 ? ClearHint : IdleHint;
+            }
         }
 
         private int HintHeight(int width)
@@ -282,6 +296,7 @@ namespace IP_UpdateTest
             else if (report != null && report.ClearChanges.Count > 0) code.Text = ShellSnippets.Build(shell, null);
             else code.Text = "";
             btnCopy.Visible = !string.IsNullOrEmpty(code.Text);
+            pnlSnippet.Invalidate();
         }
 
         private void CopySnippet()

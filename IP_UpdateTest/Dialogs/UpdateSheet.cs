@@ -82,6 +82,12 @@ namespace IP_UpdateTest
         private void Sync()
         {
             if (IsDisposed) return;
+            // 面板开着时后台重新查询发现已经没有可更新的版本（如版本被撤下）：没有可做的了，收起面板
+            if (!manager.HasUpdate && Overlay != null)
+            {
+                Cancel();
+                return;
+            }
             UpdateState state = manager.State;
             double now = Motion.Now;
             bool animate = IsHandleCreated && !Motion.IsFrozen;

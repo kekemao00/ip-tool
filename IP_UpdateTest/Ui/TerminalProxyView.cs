@@ -393,7 +393,7 @@ namespace IP_UpdateTest.Ui
     }
 
     /// <summary>
-    /// 代码块：surface2 底、等宽字体，可选中复制由外部按钮完成
+    /// 代码块：surface2 底、等宽字体，过长的行折行显示；可选中复制由外部按钮完成
     /// </summary>
     public class CodeBlock : SpringControl
     {
@@ -427,6 +427,38 @@ namespace IP_UpdateTest.Ui
             return fade.IsAnimatingAt(now);
         }
 
+        /// <summary>
+        /// 宽度为 width 时放下当前代码（折行后）需要的高度，不小于 minHeight
+        /// </summary>
+        public int HeightFor(int width, int minHeight)
+        {
+            float s = S;
+            int count = Lines(Text ?? "", TextWidth(width), s).Count;
+            return Math.Max(minHeight, (int)Math.Ceiling(count * LineHeight(s) + Px(20)));
+        }
+
+        private float LineHeight(float s)
+        {
+            return Typo.LineHeight(TextStyle.Mono, s) + Px(3);
+        }
+
+        private float TextWidth(float width)
+        {
+            return width - Px(14) - Px(14 + RightInset);
+        }
+
+        private static List<string> Lines(string text, float width, float s)
+        {
+            var lines = new List<string>();
+            if (text.Length == 0) return lines;
+            // 等宽字体：按列数折行
+            float column = Typo.Measure("0000000000", TextStyle.Mono, s) / 10;
+            int columns = column > 0 ? (int)Math.Floor(width / column) : int.MaxValue;
+            foreach (string line in text.Replace("\r\n", "\n").Split('\n'))
+                lines.AddRange(ShellSnippets.Wrap(line, columns));
+            return lines;
+        }
+
         protected override void PaintContent(Graphics g, double now)
         {
             float s = S;
@@ -435,8 +467,8 @@ namespace IP_UpdateTest.Ui
             Shapes.Fill(g, r, Px(Metrics.InputRadius), Palette.Fade(Palette.Surface2, opacity));
             Shapes.Stroke(g, r, Px(Metrics.InputRadius), Palette.Fade(Palette.Line, opacity), Px(1));
 
-            float lineHeight = Typo.LineHeight(TextStyle.Mono, s) + Px(3);
-            float x = Px(14), maxWidth = Width - x - Px(14 + RightInset);
+            float lineHeight = LineHeight(s);
+            float x = Px(14), maxWidth = TextWidth(Width);
             if (string.IsNullOrEmpty(Text))
             {
                 Typo.Draw(g, Placeholder, TextStyle.Small, Palette.Fade(Palette.Ink3, opacity), new RectangleF(x, 0, maxWidth, Height), s);
@@ -446,8 +478,8 @@ namespace IP_UpdateTest.Ui
             {
                 string text = layer.Value ?? "";
                 if (text.Length == 0) continue;
-                string[] lines = text.Replace("\r\n", "\n").Split('\n');
-                float y = (Height - lines.Length * lineHeight) / 2 + (float)layer.OffsetY * s;
+                List<string> lines = Lines(text, maxWidth, s);
+                float y = (Height - lines.Count * lineHeight) / 2 + (float)layer.OffsetY * s;
                 foreach (string line in lines)
                 {
                     float baseline = Typo.CenterBaseline(new RectangleF(0, y, Width, lineHeight), TextStyle.Mono, s);

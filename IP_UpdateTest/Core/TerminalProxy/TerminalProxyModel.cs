@@ -27,7 +27,15 @@ namespace IP_UpdateTest.Core.TerminalProxy
 
         public string Endpoint
         {
-            get { return Host + ":" + Port; }
+            get { return EndpointOf(Host, Port); }
+        }
+
+        /// <summary>
+        /// host:port；IPv6 地址加方括号，如 [::1]:7890（与 ProxySettings.UrlEndpoint 的写法一致）
+        /// </summary>
+        public static string EndpointOf(string host, int port)
+        {
+            return (host.IndexOf(':') >= 0 && !host.StartsWith("[", StringComparison.Ordinal) ? "[" + host + "]" : host) + ":" + port;
         }
 
         /// <summary>
@@ -72,7 +80,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
         public bool Installed { get; set; }
 
         /// <summary>
-        /// 设置项 → 值（如 http.proxy → http://127.0.0.1:7890），只含已设置的项
+        /// 设置项 → 值（如 http.proxy → http://127.0.0.1:7890），只含已设置的项。
+        /// 例外：Git 的 http.proxy 设成空值表示不走任何代理（连环境变量也不读），这时值为 ""
         /// </summary>
         public Dictionary<string, string> Values { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -100,11 +109,12 @@ namespace IP_UpdateTest.Core.TerminalProxy
         }
 
         /// <summary>
-        /// 工具其实不读的项：Git 只认 http.proxy 和 http.&lt;url&gt;.proxy，很多教程让人设置的 https.proxy 不起作用
+        /// 工具其实不读的项：Git 只认 http.proxy 和 http.&lt;url&gt;.proxy，没有 https 这一节，
+        /// 很多教程让人设置的 https.proxy、https.https://github.com.proxy 都不起作用
         /// </summary>
         public static bool IsIgnored(ProxyTool tool, string key)
         {
-            return tool == ProxyTool.Git && string.Equals(key, "https.proxy", StringComparison.OrdinalIgnoreCase);
+            return tool == ProxyTool.Git && key.StartsWith("https.", StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -263,6 +273,16 @@ namespace IP_UpdateTest.Core.TerminalProxy
         /// </summary>
         public string NoProxy { get; set; }
 
+        /// <summary>
+        /// 清除之后新开的终端仍会使用的代理地址（如用户自己设的公司代理，或清除时恢复的原值）；清除后直连时为 null
+        /// </summary>
+        public string ProxyAfterClear { get; set; }
+
+        /// <summary>
+        /// 清除会改到的环境变量 → 清除之后新开的终端里的值（null 表示没有），已打开的终端照此设置即可一致
+        /// </summary>
+        public List<KeyValuePair<string, string>> ClearedVariables { get; } = new List<KeyValuePair<string, string>>();
+
         public bool HasProblem
         {
             get { return Overall == CheckStatus.Fail || Overall == CheckStatus.Warning; }
@@ -314,6 +334,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
     {
         [System.Runtime.Serialization.DataMember] private Dictionary<string, string> previous;
         [System.Runtime.Serialization.DataMember] private Dictionary<string, string> written;
+        [System.Runtime.Serialization.DataMember] private string followState;
 
         /// <summary>
         /// 键 → 本程序第一次改它之前的值（之前没有的不记录）
@@ -331,9 +352,18 @@ namespace IP_UpdateTest.Core.TerminalProxy
             get { return written ?? (written = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)); }
         }
 
+        /// <summary>
+        /// 跟随系统代理最后同步到的状态（如“on:127.0.0.1:10809”“off”），程序重启后据此判断系统代理在这期间有没有变
+        /// </summary>
+        public string FollowState
+        {
+            get { return followState; }
+            set { followState = value; }
+        }
+
         public bool IsEmpty
         {
-            get { return Previous.Count == 0 && Written.Count == 0; }
+            get { return Previous.Count == 0 && Written.Count == 0 && followState == null; }
         }
 
         public static string KeyOf(ProxyChangeTarget target, string key)
@@ -366,7 +396,33 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 if (!string.IsNullOrWhiteSpace(oldValue)) Previous[key] = oldValue.Trim();
             }
             Remove(Written, key);
-            Written[key] = newValue;
+            // 删除（如 Git 的空 http.proxy）之后没有本程序写入的值
+            if (newValue != null) Written[key] = newValue;
+        }
+
+        /// <summary>
+        /// 一项的备份
+        /// </summary>
+        public struct Entry
+        {
+            public string Previous;
+            public string Written;
+        }
+
+        /// <summary>
+        /// 记下一项现在的备份：Record 之后没改成时用 Restore 放回去，备份仍与实际的值对应
+        /// </summary>
+        public Entry Snapshot(string key)
+        {
+            return new Entry { Previous = Find(Previous, key), Written = Find(Written, key) };
+        }
+
+        public void Restore(string key, Entry entry)
+        {
+            Remove(Previous, key);
+            Remove(Written, key);
+            if (entry.Previous != null) Previous[key] = entry.Previous;
+            if (entry.Written != null) Written[key] = entry.Written;
         }
 
         /// <summary>

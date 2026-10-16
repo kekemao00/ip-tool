@@ -121,13 +121,10 @@ namespace IP_UpdateTest.Core.TerminalProxy
             Task tools = Task.Run(() => ReadTools(f));
             await FindCandidatesAsync(f, owners, listeners);
 
-            // 其余设置里出现的地址只测能否连接
+            // 其余设置里出现的地址只测能否连接。用户级和系统级的都测：清除用户级之后系统级的会生效
             await tools;
             var endpoints = new List<string>();
-            foreach (string name in TerminalProxyAnalyzer.ProxyVariables)
-            {
-                endpoints.Add(ProxySettings.UrlEndpoint(f.EffectiveEnvironment(name)));
-            }
+            endpoints.AddRange(ProxyVariableValues(f).Select(ProxySettings.UrlEndpoint));
             endpoints.AddRange(f.Tools.SelectMany(t => t.Values.Values).Select(ProxySettings.UrlEndpoint));
             endpoints.Add(ProxySettings.FirstEndpoint(f.WinHttpProxy));
             List<string> pending = endpoints.Where(e => e != null && !f.Reachable.ContainsKey(e)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -138,6 +135,19 @@ namespace IP_UpdateTest.Core.TerminalProxy
             ProxyCandidate chosen = f.Candidates.FirstOrDefault(c => TerminalProxyAnalyzer.SameEndpoint(c.Endpoint, selected));
             await Task.WhenAll(new[] { target, chosen }.Where(c => c != null).Distinct().Select(c => TestTunnelAsync(f, c)));
             return f;
+        }
+
+        /// <summary>
+        /// 用户级和系统级的 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY
+        /// </summary>
+        private static IEnumerable<string> ProxyVariableValues(TerminalProxySnapshot f)
+        {
+            foreach (string name in TerminalProxyAnalyzer.ProxyVariables)
+            {
+                string value;
+                if (f.UserEnvironment.TryGetValue(name, out value)) yield return value;
+                if (f.MachineEnvironment.TryGetValue(name, out value)) yield return value;
+            }
         }
 
         /// <summary>
@@ -236,12 +246,11 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 foreach (int port in ProxyClients.WellKnownPorts) ports[port] = null;
             }
             // 环境变量指向的本机端口也探测：端口不常见、进程不认识时也能认出代理
-            foreach (string name in TerminalProxyAnalyzer.ProxyVariables)
+            foreach (string url in ProxyVariableValues(f))
             {
-                string url = f.EffectiveEnvironment(name);
                 string host;
                 int port;
-                if (url != null && TerminalProxyAnalyzer.IsLoopback(url) && ProxySettings.TrySplit(ProxySettings.UrlEndpoint(url), out host, out port) && !ports.ContainsKey(port))
+                if (TerminalProxyAnalyzer.IsLoopback(url) && ProxySettings.TrySplit(ProxySettings.UrlEndpoint(url), out host, out port) && !ports.ContainsKey(port))
                     ports[port] = null;
             }
 
@@ -262,9 +271,10 @@ namespace IP_UpdateTest.Core.TerminalProxy
             await Task.WhenAll(hosts.Select(async h =>
             {
                 PortProbeResult probe = await ProxyPortProbe.ProbeAsync(h.Key, h.Value);
+                string endpoint = ProxyCandidate.EndpointOf(h.Key, h.Value);
                 lock (found)
                 {
-                    f.Reachable[h.Key + ":" + h.Value] = probe.Listening;
+                    f.Reachable[endpoint] = probe.Listening;
                     if (!probe.Http && !probe.Socks5) return;
                     string owner;
                     ports.TryGetValue(h.Value, out owner);
@@ -275,7 +285,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
                         Http = probe.Http,
                         Socks5 = probe.Socks5,
                         Owner = h.Key == "127.0.0.1" ? owner : null,
-                        IsSystemProxy = systemEndpoints.Any(e => TerminalProxyAnalyzer.SameEndpoint(e, h.Key + ":" + h.Value))
+                        IsSystemProxy = systemEndpoints.Any(e => TerminalProxyAnalyzer.SameEndpoint(e, endpoint))
                     });
                 }
             }));
@@ -338,7 +348,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
             }
         }
 
-        private static void ReadTools(TerminalProxySnapshot f)
+        internal static void ReadTools(TerminalProxySnapshot f)
         {
             // http.proxy、https.proxy，以及只对某个网站生效的 http.https://github.com.proxy；返回 1 表示一项都没有
             var git = new ToolProxySetting { Tool = ProxyTool.Git };
@@ -351,10 +361,11 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 {
                     int space = line.IndexOf(' ');
                     if (space <= 0) continue;
-                    string value = line.Substring(space + 1).Trim();
-                    // 同一项写了多次时 Git 取最后一个
-                    if (value.Length > 0) git.Values[line.Substring(0, space)] = value;
-                    else git.Values.Remove(line.Substring(0, space));
+                    string key = line.Substring(0, space), value = line.Substring(space + 1).Trim();
+                    // 同一项写了多次时 Git 取最后一个。空的 http.proxy 表示不走任何代理（连环境变量也不读），要留着；
+                    // 空的 http.<url>.proxy 只是让这个网站不走代理，当作没设置
+                    if (value.Length > 0 || string.Equals(key, "http.proxy", StringComparison.OrdinalIgnoreCase)) git.Values[key] = value;
+                    else git.Values.Remove(key);
                 }
             }
             f.Tools.Add(git);

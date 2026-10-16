@@ -175,7 +175,8 @@ namespace IP_UpdateTest.Tests.Core
             TerminalProxyReport report = Analyze(f, backup);
 
             Assert.Contains(report.ClearChanges, c => c.Key == "HTTPS_PROXY" && c.NewValue == "http://proxy.corp:8080");
-            Assert.Contains(report.ClearChanges, c => c.Key == "NO_PROXY" && c.NewValue == null);
+            // 恢复公司代理后 NO_PROXY 留着：本机地址不该走公司代理
+            Assert.DoesNotContain(report.ClearChanges, c => c.Key == "NO_PROXY");
         }
 
         [Fact]
@@ -257,7 +258,7 @@ namespace IP_UpdateTest.Tests.Core
         public void Snippets_ForEachShell()
         {
             const string url = "http://127.0.0.1:10809";
-            Assert.Contains("$env:HTTPS_PROXY = \"http://127.0.0.1:10809\"", ShellSnippets.Build(ShellKind.PowerShell, url));
+            Assert.Contains("$env:HTTPS_PROXY = 'http://127.0.0.1:10809'", ShellSnippets.Build(ShellKind.PowerShell, url));
             Assert.Contains("set HTTPS_PROXY=http://127.0.0.1:10809", ShellSnippets.Build(ShellKind.Cmd, url));
             Assert.Contains("export http_proxy=http://127.0.0.1:10809", ShellSnippets.Build(ShellKind.Bash, url));
             Assert.Contains("Remove-Item Env:HTTP_PROXY", ShellSnippets.Build(ShellKind.PowerShell, null));
@@ -266,12 +267,60 @@ namespace IP_UpdateTest.Tests.Core
 
             // 同一条 export 里的 $no_proxy 会在赋值前展开，必须分成两条命令
             Assert.Contains("export no_proxy=localhost,127.0.0.1,::1; export NO_PROXY=$no_proxy", ShellSnippets.Build(ShellKind.Bash, url));
-            // 每行都放得下（命令框约 80 个等宽字符宽）
-            foreach (ShellKind shell in new[] { ShellKind.PowerShell, ShellKind.Cmd, ShellKind.Bash })
+        }
+
+        [Fact]
+        public void Snippets_QuoteTheUsersNoProxy()
+        {
+            // 用户已有的 NO_PROXY 可能带空格、分号或 &lt;local&gt;：不加引号 bash 会报错，cmd 会当成重定向
+            const string url = "http://127.0.0.1:10809", noProxy = "localhost, 127.0.0.1;<local>";
+            Assert.Contains("export no_proxy='localhost, 127.0.0.1;<local>'; export NO_PROXY=$no_proxy", ShellSnippets.Build(ShellKind.Bash, url, noProxy));
+            Assert.Contains("set \"NO_PROXY=localhost, 127.0.0.1;<local>\"", ShellSnippets.Build(ShellKind.Cmd, url, noProxy));
+            Assert.Contains("$env:NO_PROXY = 'it''s'", ShellSnippets.Build(ShellKind.PowerShell, url, "it's"));
+            Assert.Contains("export no_proxy='it'\\''s'", ShellSnippets.Build(ShellKind.Bash, url, "it's"));
+            Assert.Contains("set NO_PROXY=localhost,127.0.0.1", ShellSnippets.Build(ShellKind.Cmd, url, "localhost,127.0.0.1"));
+        }
+
+        [Fact]
+        public void Snippets_SetWhatTheClearLeaves()
+        {
+            // 清除恢复了公司代理、删掉了 NO_PROXY：已打开的终端照此设置
+            var values = new List<KeyValuePair<string, string>>
             {
-                foreach (string text in new[] { ShellSnippets.Build(shell, url), ShellSnippets.Build(shell, null) })
-                    Assert.All(text.Split('\n'), line => Assert.True(line.TrimEnd('\r').Length <= 80, line));
-            }
+                new KeyValuePair<string, string>("HTTPS_PROXY", "http://proxy.corp:8080"),
+                new KeyValuePair<string, string>("HTTP_PROXY", null),
+                new KeyValuePair<string, string>("NO_PROXY", null)
+            };
+            string ps = ShellSnippets.BuildVariables(ShellKind.PowerShell, values);
+            Assert.Contains("$env:HTTPS_PROXY = 'http://proxy.corp:8080'", ps);
+            Assert.Contains("Remove-Item Env:HTTP_PROXY, Env:NO_PROXY -ErrorAction SilentlyContinue", ps);
+            Assert.DoesNotContain("Env:HTTPS_PROXY,", ps);
+            Assert.Contains("set HTTP_PROXY=", ShellSnippets.BuildVariables(ShellKind.Cmd, values));
+            string bash = ShellSnippets.BuildVariables(ShellKind.Bash, values);
+            Assert.Contains("export https_proxy=http://proxy.corp:8080 HTTPS_PROXY=http://proxy.corp:8080", bash);
+            Assert.Contains("unset http_proxy no_proxy HTTP_PROXY NO_PROXY", bash);
+        }
+
+        [Fact]
+        public void Snippets_WrapLongLines()
+        {
+            // v2rayN 的例外列表转成 NO_PROXY 后一行放不下：折行显示，尽量在逗号后断开，续行缩进
+            string v2rayN = "localhost;127.*;10.*;" + string.Join(";", Enumerable.Range(16, 16).Select(n => $"172.{n}.*")) + ";192.168.*;<local>";
+            string text = ShellSnippets.Build(ShellKind.Bash, "http://127.0.0.1:10809", TerminalProxyAnalyzer.BuildNoProxy(v2rayN));
+            string longest = text.Split('\n').Select(l => l.TrimEnd('\r')).OrderByDescending(l => l.Length).First();
+            Assert.True(longest.Length > 81);
+
+            List<string> lines = ShellSnippets.Wrap(longest, 81);
+            Assert.True(lines.Count > 1);
+            Assert.All(lines, l => Assert.True(l.Length <= 81, l));
+            Assert.All(lines.Skip(1), l => Assert.StartsWith("  ", l));
+            Assert.EndsWith(",", lines[0]);
+            Assert.Equal(longest.Replace(" ", ""), string.Concat(lines).Replace(" ", ""));
+
+            Assert.Equal(new[] { "short" }, ShellSnippets.Wrap("short", 81));
+            Assert.Equal(new[] { "" }, ShellSnippets.Wrap("", 81));
+            // 没有可断开的地方时按列硬断
+            Assert.Equal(new[] { "abcdefghij", "  klmnopqr", "  st" }, ShellSnippets.Wrap("abcdefghijklmnopqrst", 10));
         }
 
         [Fact]
@@ -318,6 +367,9 @@ namespace IP_UpdateTest.Tests.Core
             Assert.True(ProxyPortProbe.IsHttpResponse(Encoding.ASCII.GetBytes("HTTP/1.1 200 Connection established")));
             Assert.True(ProxyPortProbe.IsHttpResponse(Encoding.ASCII.GetBytes("HTTP/1.1 407 Proxy Authentication Required")));
             Assert.True(ProxyPortProbe.IsHttpResponse(Encoding.ASCII.GetBytes("HTTP/1.0 502 Bad Gateway")));
+            // tinyproxy 连不上目标回 500，squid 的访问控制回 403
+            Assert.True(ProxyPortProbe.IsHttpResponse(Encoding.ASCII.GetBytes("HTTP/1.0 500 Unable to connect")));
+            Assert.True(ProxyPortProbe.IsHttpResponse(Encoding.ASCII.GetBytes("HTTP/1.1 403 Forbidden")));
             // 网页界面、控制接口（v2rayA 2017、Clash 9090）不是代理
             Assert.False(ProxyPortProbe.IsHttpResponse(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found")));
             Assert.False(ProxyPortProbe.IsHttpResponse(Encoding.ASCII.GetBytes("HTTP/1.1 405 Method Not Allowed")));
@@ -540,6 +592,308 @@ namespace IP_UpdateTest.Tests.Core
 
             Assert.Equal(CheckStatus.Fail, report.Overall);
             Assert.Equal(CheckStatus.Fail, report.Steps.Last().Status);
+        }
+
+        [Fact]
+        public void Backup_FailedChangeIsPutBack()
+        {
+            // 第一次一键设置把 Git 的公司代理改成 7890；第二次改 10809 时 git config 失败，备份要放回去
+            const string key = "Git:http.proxy", corp = "http://proxy.corp:8080";
+            var backup = new TerminalProxyBackup();
+            backup.Record(key, corp, "http://127.0.0.1:7890");
+            TerminalProxyBackup.Entry saved = backup.Snapshot(key);
+            backup.Record(key, "http://127.0.0.1:7890", "http://127.0.0.1:10809");
+            backup.Restore(key, saved);
+
+            Assert.True(backup.Wrote(key, "http://127.0.0.1:7890"));
+            var f = new TerminalProxySnapshot();
+            f.Tools.Add(new ToolProxySetting { Tool = ProxyTool.Git, Installed = true });
+            f.Tools[0].Values["http.proxy"] = "http://127.0.0.1:7890";
+            ProxyChange clear = TerminalProxyAnalyzer.Analyze(f, null, backup).ClearChanges.Single(c => c.Target == ProxyChangeTarget.Git);
+            Assert.Equal(corp, clear.NewValue);
+
+            // 原来没有的项放回去就是没有
+            backup.Restore("HTTPS_PROXY", backup.Snapshot("HTTPS_PROXY"));
+            Assert.Null(backup.PreviousOf("HTTPS_PROXY"));
+            Assert.False(backup.Wrote("HTTPS_PROXY", "http://127.0.0.1:10809"));
+        }
+
+        [Fact]
+        public void Backup_KeepsFollowState()
+        {
+            var backup = new TerminalProxyBackup { FollowState = "on:127.0.0.1:10809" };
+            Assert.False(backup.IsEmpty);
+            TerminalProxyBackup read = IP_UpdateTest.Core.JsonFile.Deserialize<TerminalProxyBackup>(IP_UpdateTest.Core.JsonFile.Serialize(backup));
+            Assert.Equal("on:127.0.0.1:10809", read.FollowState);
+            // 上次运行时同步到“开”、启动时已关：程序没运行时系统代理关了，要清除
+            Assert.True(TerminalProxyFollower.ShouldSync(read.FollowState, "off", false));
+            // 旧格式没有这一项
+            Assert.Null(IP_UpdateTest.Core.JsonFile.Deserialize<TerminalProxyBackup>("{}").FollowState);
+            Assert.True(new TerminalProxyBackup().IsEmpty);
+        }
+
+        [Fact]
+        public void Follower_MovesToolProxiesItWrote()
+        {
+            // 一键设置把 Git 的 http.proxy 改成了 7890；系统代理换到 7897 或关掉时要跟着改，不然 Git 停在失效的端口上
+            var backup = new TerminalProxyBackup();
+            backup.Record("Git:http.proxy", null, "http://127.0.0.1:7890");
+            var git = new ToolProxySetting { Tool = ProxyTool.Git, Installed = true };
+            git.Values["http.proxy"] = "http://127.0.0.1:7890";
+            var npm = new ToolProxySetting { Tool = ProxyTool.Npm, Installed = true };
+            npm.Values["proxy"] = "http://127.0.0.1:3128"; // 用户自己设的，不动
+
+            var on = new TerminalProxySnapshot { SystemProxyEnabled = true, SystemProxyServer = "127.0.0.1:7897" };
+            on.Tools.Add(git);
+            on.Tools.Add(npm);
+            List<ProxyChange> changes = TerminalProxyFollower.Decide(on, backup);
+            Assert.Contains(changes, c => c.Target == ProxyChangeTarget.Git && c.NewValue == "http://127.0.0.1:7897");
+            Assert.DoesNotContain(changes, c => c.Target == ProxyChangeTarget.Npm);
+
+            var off = new TerminalProxySnapshot();
+            off.Tools.Add(git);
+            off.Tools.Add(npm);
+            changes = TerminalProxyFollower.Decide(off, backup);
+            Assert.Contains(changes, c => c.Target == ProxyChangeTarget.Git && c.NewValue == null);
+            Assert.DoesNotContain(changes, c => c.Target == ProxyChangeTarget.Npm);
+        }
+
+        [Fact]
+        public void Follower_Ipv6SystemProxy_WritesValidUrl()
+        {
+            var f = new TerminalProxySnapshot { SystemProxyEnabled = true, SystemProxyServer = "[::1]:7890" };
+            Assert.Contains(TerminalProxyFollower.Decide(f, null), c => c.Key == "HTTPS_PROXY" && c.NewValue == "http://[::1]:7890");
+            Assert.Equal("[::1]:7890", ProxyCandidate.EndpointOf("::1", 7890));
+            Assert.Equal("127.0.0.1:7890", ProxyCandidate.EndpointOf("127.0.0.1", 7890));
+        }
+
+        [Fact]
+        public void Follower_MessageWhenRestoring()
+        {
+            var restored = new List<ProxyChange> { new ProxyChange(ProxyChangeTarget.Environment, "HTTPS_PROXY", "http://127.0.0.1:7890", "http://proxy.corp:8080") };
+            Assert.Equal("系统代理已关闭，命令行代理已恢复为 http://proxy.corp:8080", TerminalProxyFollower.Message(restored, false));
+            var cleared = new List<ProxyChange> { new ProxyChange(ProxyChangeTarget.Environment, "HTTPS_PROXY", "http://127.0.0.1:7890", null) };
+            Assert.Equal("系统代理已关闭，命令行代理已随之清除", TerminalProxyFollower.Message(cleared, false));
+        }
+
+        [Fact]
+        public void Clear_KeepsNoProxyWhileAnotherProxyStays()
+        {
+            // 一键设置写过 NO_PROXY，之后用户自己把 HTTP(S)_PROXY 改成了公司代理：清除不能删 NO_PROXY，不然本机和内网也走公司代理
+            var backup = new TerminalProxyBackup();
+            backup.Record("HTTPS_PROXY", null, "http://127.0.0.1:10809");
+            backup.Record("NO_PROXY", null, TerminalProxyAnalyzer.DefaultNoProxy);
+            var f = new TerminalProxySnapshot();
+            f.UserEnvironment["HTTP_PROXY"] = f.UserEnvironment["HTTPS_PROXY"] = "http://proxy.corp:8080";
+            f.UserEnvironment["NO_PROXY"] = TerminalProxyAnalyzer.DefaultNoProxy;
+
+            TerminalProxyReport report = Analyze(f, backup);
+            Assert.Empty(report.ClearChanges);
+            Assert.Empty(TerminalProxyFollower.Decide(f, backup));
+
+            // 代理变量都会删掉时 NO_PROXY 才一起删
+            f.UserEnvironment["HTTP_PROXY"] = f.UserEnvironment["HTTPS_PROXY"] = "http://127.0.0.1:10809";
+            report = Analyze(f, backup);
+            Assert.Contains(report.ClearChanges, c => c.Key == "NO_PROXY" && c.NewValue == null);
+            Assert.Null(report.ProxyAfterClear);
+        }
+
+        [Fact]
+        public void Clear_ThatRestoresCompanyProxy_SaysSo()
+        {
+            var backup = new TerminalProxyBackup();
+            backup.Record("HTTPS_PROXY", "http://proxy.corp:8080", "http://127.0.0.1:10809");
+            var f = new TerminalProxySnapshot();
+            f.UserEnvironment["HTTPS_PROXY"] = "http://127.0.0.1:10809";
+            f.Reachable["127.0.0.1:10809"] = false;
+
+            TerminalProxyReport report = Analyze(f, backup);
+
+            Assert.Equal("命令行代理已失效", report.Title);
+            Assert.DoesNotContain("恢复直连", report.Detail);
+            Assert.Contains("http://proxy.corp:8080", report.Detail);
+            Assert.Equal("http://proxy.corp:8080", report.ProxyAfterClear);
+            KeyValuePair<string, string> v = Assert.Single(report.ClearedVariables);
+            Assert.Equal("HTTPS_PROXY", v.Key);
+            Assert.Equal("http://proxy.corp:8080", v.Value);
+        }
+
+        [Fact]
+        public void Clear_OnlyToolSettings_NeedsNoSnippet()
+        {
+            // 环境变量里的公司代理能用，只有 Git 指向已关掉的本机代理：清除只删 Git 这一项
+            var f = new TerminalProxySnapshot();
+            f.UserEnvironment["HTTP_PROXY"] = f.UserEnvironment["HTTPS_PROXY"] = "http://proxy.corp:8080";
+            f.Reachable["proxy.corp:8080"] = true;
+            f.Tools.Add(new ToolProxySetting { Tool = ProxyTool.Git, Installed = true });
+            f.Tools[0].Values["http.proxy"] = "http://127.0.0.1:7890";
+            f.Reachable["127.0.0.1:7890"] = false;
+
+            TerminalProxyReport report = Analyze(f);
+
+            ProxyChange change = Assert.Single(report.ClearChanges);
+            Assert.Equal(ProxyChangeTarget.Git, change.Target);
+            Assert.Empty(report.ClearedVariables);
+            Assert.Equal("http://proxy.corp:8080", report.ProxyAfterClear);
+        }
+
+        [Fact]
+        public void Clear_MachineValueTakesOver()
+        {
+            // 用户级的删掉后系统级的生效：已打开的终端要设成系统级的值，而不是删掉
+            var f = new TerminalProxySnapshot();
+            f.UserEnvironment["HTTPS_PROXY"] = "http://127.0.0.1:7890";
+            f.MachineEnvironment["HTTPS_PROXY"] = "http://proxy.corp:8080";
+            f.Reachable["127.0.0.1:7890"] = false;
+            f.Reachable["proxy.corp:8080"] = true;
+
+            TerminalProxyReport report = Analyze(f);
+
+            Assert.Null(report.StaleAfterClear);
+            KeyValuePair<string, string> v = Assert.Single(report.ClearedVariables);
+            Assert.Equal("http://proxy.corp:8080", v.Value);
+            Assert.Contains("改经 http://proxy.corp:8080", report.Detail);
+        }
+
+        [Fact]
+        public void Pip_SocksEnvironmentIsFixedByApplyWithHttpTarget()
+        {
+            // Clash 混合端口：环境变量写成了 socks5://，一键设置会改成 http://，pip 也就好了
+            var f = new TerminalProxySnapshot { SystemProxyEnabled = true, SystemProxyServer = "127.0.0.1:7890" };
+            f.Candidates.Add(new ProxyCandidate { Port = 7890, Http = true, Socks5 = true, Owner = "Clash Verge", IsSystemProxy = true });
+            f.Reachable["127.0.0.1:7890"] = true;
+            f.UserEnvironment["HTTP_PROXY"] = f.UserEnvironment["HTTPS_PROXY"] = "socks5://127.0.0.1:7890";
+            f.UserEnvironment["NO_PROXY"] = "localhost";
+            f.Tools.Add(new ToolProxySetting { Tool = ProxyTool.Pip, Installed = true });
+
+            TerminalProxyReport report = Analyze(f);
+
+            TerminalProxyRow pip = Row(report, "pip");
+            Assert.Equal("不支持 SOCKS", pip.Badge);
+            Assert.DoesNotContain("改选 HTTP 端口", pip.Detail);
+            Assert.Contains("一键设置", pip.Detail);
+            Assert.NotEqual("部分命令行工具需要手动设置", report.Title);
+            Assert.Contains("一键设置可全部改正", report.Detail);
+        }
+
+        [Fact]
+        public void Pip_SocksInPipIniIsWarned()
+        {
+            TerminalProxySnapshot f = V2rayN();
+            f.UserEnvironment["HTTP_PROXY"] = f.UserEnvironment["HTTPS_PROXY"] = "http://127.0.0.1:10809";
+            f.UserEnvironment["NO_PROXY"] = "localhost";
+            f.Tools[2].Installed = true;
+            f.Tools[2].Values["proxy"] = "socks5://127.0.0.1:10808";
+
+            TerminalProxyReport report = Analyze(f);
+
+            Assert.Equal("不支持 SOCKS", Row(report, "pip").Badge);
+            Assert.NotEqual(CheckStatus.Ok, report.Overall);
+            Assert.Contains(report.ApplyChanges, c => c.Target == ProxyChangeTarget.Pip && c.NewValue == "http://127.0.0.1:10809");
+        }
+
+        [Fact]
+        public void SocksOnlyTarget_WarnsAheadAboutPip()
+        {
+            var f = new TerminalProxySnapshot();
+            f.Candidates.Add(new ProxyCandidate { Port = 1080, Socks5 = true, Owner = "Shadowsocks" });
+            f.Tools.Add(new ToolProxySetting { Tool = ProxyTool.Pip, Installed = true });
+
+            TerminalProxyReport report = Analyze(f);
+
+            Assert.Equal("命令行还没有走代理", report.Title);
+            Assert.Contains("pip 用不了", report.Detail);
+        }
+
+        [Fact]
+        public void UnsetEnvironment_WithManualToolProblem_IsNotPromisedAsFixed()
+        {
+            // 只有 SOCKS 端口、环境变量没设、npm 指向已关掉的端口：一键设置改不了 npm，不能说设置后就好
+            var f = new TerminalProxySnapshot();
+            f.Candidates.Add(new ProxyCandidate { Port = 1080, Socks5 = true });
+            var npm = new ToolProxySetting { Tool = ProxyTool.Npm, Installed = true };
+            npm.Values["proxy"] = "http://127.0.0.1:7890";
+            f.Tools.Add(npm);
+            f.Reachable["127.0.0.1:7890"] = false;
+
+            TerminalProxyReport report = Analyze(f);
+
+            Assert.Equal(CheckStatus.Fail, report.Overall);
+            Assert.NotEqual("命令行还没有走代理", report.Title);
+            Assert.Contains("npm", report.Detail);
+
+            // 能改正的工具问题：仍说“还没有走代理”，但颜色是失效，并提到 Git
+            TerminalProxySnapshot g = V2rayN();
+            g.Tools[0].Values["http.proxy"] = "http://127.0.0.1:7890";
+            g.Reachable["127.0.0.1:7890"] = false;
+            report = Analyze(g);
+            Assert.Equal("命令行还没有走代理", report.Title);
+            Assert.Equal(CheckStatus.Fail, report.Overall);
+            Assert.Contains("Git", report.Detail);
+        }
+
+        [Fact]
+        public void Git_EmptyHttpProxyDisablesProxying()
+        {
+            // git config --global http.proxy ""：Git 不走任何代理，连环境变量也不读
+            TerminalProxySnapshot f = V2rayN();
+            f.UserEnvironment["HTTP_PROXY"] = f.UserEnvironment["HTTPS_PROXY"] = "http://127.0.0.1:10809";
+            f.UserEnvironment["NO_PROXY"] = "localhost";
+            f.Tools[0].Values["http.proxy"] = "";
+
+            TerminalProxyReport report = Analyze(f);
+
+            Assert.Equal("已禁用", Row(report, "git").Badge);
+            Assert.NotEqual(CheckStatus.Ok, report.Overall);
+            ProxyChange change = Assert.Single(report.ApplyChanges);
+            Assert.Equal("删除 Git http.proxy", change.ToString());
+            Assert.DoesNotContain(report.ClearChanges, c => c.Target == ProxyChangeTarget.Git);
+
+            // 没有代理时 Git 直连是对的
+            var g = new TerminalProxySnapshot();
+            g.Tools.Add(new ToolProxySetting { Tool = ProxyTool.Git, Installed = true });
+            g.Tools[0].Values["http.proxy"] = "";
+            Assert.Equal(CheckStatus.Info, Row(Analyze(g), "git").Status);
+        }
+
+        [Fact]
+        public void Git_HttpsSectionIsIgnoredEntirely()
+        {
+            // Git 没有 https 这一节：https.https://github.com.proxy 失效也不影响 Git
+            TerminalProxySnapshot f = V2rayN();
+            f.UserEnvironment["HTTP_PROXY"] = f.UserEnvironment["HTTPS_PROXY"] = "http://127.0.0.1:10809";
+            f.UserEnvironment["NO_PROXY"] = "localhost";
+            f.Tools[0].Values["https.https://github.com.proxy"] = "socks5://127.0.0.1:1080";
+            f.Reachable["127.0.0.1:1080"] = false;
+
+            TerminalProxyReport report = Analyze(f);
+
+            Assert.Equal(CheckStatus.Info, Row(report, "git").Status);
+            Assert.Equal(CheckStatus.Ok, report.Overall);
+            Assert.Empty(report.ApplyChanges);
+            Assert.True(ToolProxySetting.IsIgnored(ProxyTool.Git, "https.proxy"));
+            Assert.False(ToolProxySetting.IsIgnored(ProxyTool.Git, "http.https://github.com.proxy"));
+        }
+
+        [Fact]
+        public void Git_SiteRouteToAnotherProxyIsLeftAlone()
+        {
+            // 公司 Git 服务器走公司代理是有意的分流：不算不一致，一键设置不改
+            TerminalProxySnapshot f = V2rayN();
+            f.UserEnvironment["HTTP_PROXY"] = f.UserEnvironment["HTTPS_PROXY"] = "http://127.0.0.1:10809";
+            f.UserEnvironment["NO_PROXY"] = "localhost";
+            f.Tools[0].Values["http.https://git.corp.example.proxy"] = "http://proxy.corp:8080";
+            f.Reachable["proxy.corp:8080"] = true;
+
+            TerminalProxyReport report = Analyze(f);
+
+            Assert.Equal(CheckStatus.Ok, Row(report, "git").Status);
+            Assert.Equal(CheckStatus.Ok, report.Overall);
+            Assert.Empty(report.ApplyChanges);
+
+            // 全局的 http.proxy 指向别的代理仍算不一致
+            f.Tools[0].Values["http.proxy"] = "http://proxy.corp:8080";
+            Assert.Equal("不一致", Row(Analyze(f), "git").Badge);
         }
 
         [Fact]

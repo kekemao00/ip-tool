@@ -19,6 +19,7 @@ namespace IP_UpdateTest
     {
         private const string ApplyHint = "一键设置写入用户环境变量，新开的终端自动生效；VS Code 等已打开的程序需要重启。";
         private const string ClearHint = "清除只删除指向本机代理的设置，新开的终端恢复直连；已打开的终端粘贴上面的命令即可。";
+        private const string ToolClearHint = "清除只改 Git / npm / pip 里指向本机代理的设置，立即生效，不用重开终端。";
         private const string IdleHint = "启动代理软件后按 F5 或点“重新检测”。";
         private const string ManualHint = "系统级变量和不指向本机的设置“清除”不会改；已打开的终端粘贴上面的命令可先临时清掉。";
 
@@ -127,14 +128,16 @@ namespace IP_UpdateTest
 
             // 命令卡片：代理地址、终端类型、命令、说明
             int pad = P(16);
-            int hintH = HintHeight(width - pad * 2);
-            int snippetH = pad + P(36) + P(12) + P(82) + P(10) + hintH + P(14);
-            pnlSnippet.SetBounds(gutter, footerY - P(16) - snippetH, width, snippetH);
             int inner = width - pad * 2;
+            int hintH = HintHeight(inner);
+            // 命令太长时折行，框随之变高
+            int codeH = code.HeightFor(inner, P(82));
+            int snippetH = pad + P(36) + P(12) + codeH + P(10) + hintH + P(14);
+            pnlSnippet.SetBounds(gutter, footerY - P(16) - snippetH, width, snippetH);
             int segW = Math.Min(P(330), inner / 2);
             segShell.SetBounds(pnlSnippet.Width - pad - segW, pad, segW, P(36));
             cbxProxy.Place(new Rectangle(pad, pad - P(2), segShell.Left - P(12) - pad, P(40)));
-            code.SetBounds(pad, pad + P(36) + P(12), inner, P(82));
+            code.SetBounds(pad, pad + P(36) + P(12), inner, codeH);
             int copy = P(32);
             btnCopy.SetBounds(code.Width - P(6) - copy, P(6), copy, copy);
 
@@ -163,7 +166,11 @@ namespace IP_UpdateTest
             {
                 if (report == null || report.Target != null) return ApplyHint;
                 if (report.StaleAfterClear != null) return ManualHint;
-                return report.ClearChanges.Count > 0 ? ClearHint : IdleHint;
+                if (report.ClearChanges.Count == 0) return IdleHint;
+                if (report.ClearedVariables.Count == 0) return ToolClearHint;
+                // 清除会恢复原来的代理，或还有别的代理变量留着：不能说恢复直连
+                return report.ProxyAfterClear == null ? ClearHint
+                    : $"清除后，新开的终端经 {report.ProxyAfterClear} 上网；已打开的终端粘贴上面的命令即可。";
             }
         }
 
@@ -332,10 +339,14 @@ namespace IP_UpdateTest
         {
             var shell = (ShellKind)Math.Max(0, segShell.SelectedIndex);
             if (report != null && report.Target != null) code.Text = ShellSnippets.Build(shell, report.Target.Url, report.NoProxy);
-            else if (report != null && (report.ClearChanges.Count > 0 || report.StaleAfterClear != null)) code.Text = ShellSnippets.Build(shell, null);
+            // 清除改不掉的失效设置：已打开的终端先临时全部清掉
+            else if (report != null && report.StaleAfterClear != null) code.Text = ShellSnippets.Build(shell, null);
+            // 照清除之后新开的终端里的值设置（可能恢复了原来的代理）；只改 Git 等工具时它们立即生效，不用命令
+            else if (report != null && report.ClearedVariables.Count > 0) code.Text = ShellSnippets.BuildVariables(shell, report.ClearedVariables);
             else code.Text = "";
             btnCopy.Visible = !string.IsNullOrEmpty(code.Text);
             pnlSnippet.Invalidate();
+            PerformLayout();
         }
 
         private void CopySnippet()
@@ -370,6 +381,8 @@ namespace IP_UpdateTest
                 Notify(NoticeKind.Success, !clearing ? $"已设置 {changes.Count} 项，新开的终端即可走代理"
                     : report.StaleAfterClear != null ? $"已清除 {changes.Count} 项；{report.StaleAfterClear} 还需要手动删除"
                     : changes.Any(c => c.NewValue != null) ? $"已清除 {changes.Count} 项，恢复了原来的代理设置"
+                    : report.ClearedVariables.Count == 0 ? $"已清除 {changes.Count} 项，立即生效"
+                    : report.ProxyAfterClear != null ? $"已清除 {changes.Count} 项，新开的终端经 {report.ProxyAfterClear} 上网"
                     : $"已清除 {changes.Count} 项，新开的终端恢复直连");
             }
             else

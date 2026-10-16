@@ -75,7 +75,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
         }
 
         /// <summary>
-        /// 代理对 CONNECT 的应答：200 隧道已建立、407 要认证、502 / 503 / 504 代理连不上目标。
+        /// 代理对 CONNECT 的应答：200 隧道已建立、407 要认证、403 代理拒绝访问这个网站（squid 等的访问控制）、
+        /// 5xx 代理连不上目标（tinyproxy 回 500，多数回 502 / 503 / 504）。
         /// 网页界面和控制接口（如 v2rayA 的 2017、Clash 的 9090）会回 400 / 401 / 404 / 405，不算代理
         /// </summary>
         internal static bool IsHttpResponse(byte[] data)
@@ -86,7 +87,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
             if (!head.StartsWith("HTTP/1.", StringComparison.Ordinal) || head[8] != ' '
                 || !int.TryParse(head.Substring(9, 3), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out status))
                 return false;
-            return status == 200 || status == 407 || status == 502 || status == 503 || status == 504;
+            return status == 200 || status == 403 || status == 407 || (status >= 500 && status <= 599);
         }
 
         /// <summary>

@@ -42,10 +42,16 @@ namespace IP_UpdateTest.Core.TerminalProxy
             {
                 var errors = new List<string>();
                 TerminalProxyBackup backup = LoadBackup() ?? new TerminalProxyBackup();
+                var saved = new List<KeyValuePair<ProxyChange, TerminalProxyBackup.Entry>>();
                 if (!clearing)
                 {
                     // 先记下原来的值再改：备份写不进去就不改，免得清除时恢复不了
-                    foreach (ProxyChange change in changes) backup.Record(TerminalProxyBackup.KeyOf(change.Target, change.Key), change.OldValue, change.NewValue);
+                    foreach (ProxyChange change in changes)
+                    {
+                        string key = TerminalProxyBackup.KeyOf(change.Target, change.Key);
+                        saved.Add(new KeyValuePair<ProxyChange, TerminalProxyBackup.Entry>(change, backup.Snapshot(key)));
+                        backup.Record(key, change.OldValue, change.NewValue);
+                    }
                     if (!SaveBackup(backup, errors)) return errors;
                 }
 
@@ -92,7 +98,30 @@ namespace IP_UpdateTest.Core.TerminalProxy
                     foreach (ProxyChange change in done) backup.Forget(TerminalProxyBackup.KeyOf(change.Target, change.Key));
                     SaveBackup(backup, null);
                 }
+                else if (!clearing && done.Count < changes.Count)
+                {
+                    // 没改成的项放回原来的备份：值还是本程序上次写的，清除时仍要认得出来并恢复原值
+                    for (int i = saved.Count - 1; i >= 0; i--)
+                    {
+                        if (!done.Contains(saved[i].Key)) backup.Restore(TerminalProxyBackup.KeyOf(saved[i].Key.Target, saved[i].Key.Key), saved[i].Value);
+                    }
+                    SaveBackup(backup, null);
+                }
                 return errors;
+            }
+        }
+
+        /// <summary>
+        /// 记下跟随系统代理最后同步到的状态；null 表示忘掉（关闭跟随时），下次开启时第一次读到的状态只作为基准
+        /// </summary>
+        public static void SaveFollowState(string state)
+        {
+            lock (Gate)
+            {
+                TerminalProxyBackup backup = LoadBackup() ?? new TerminalProxyBackup();
+                if (backup.FollowState == state) return;
+                backup.FollowState = state;
+                SaveBackup(backup, null);
             }
         }
 

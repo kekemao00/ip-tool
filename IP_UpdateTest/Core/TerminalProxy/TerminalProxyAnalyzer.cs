@@ -98,6 +98,9 @@ namespace IP_UpdateTest.Core.TerminalProxy
             BuildApplyChanges(f, target, report.NoProxy, report.ApplyChanges);
             BuildClearChanges(f, backup, report.ClearChanges);
             report.StaleAfterClear = StaleAfterClear(f, report.ClearChanges);
+            report.ProxyAfterClear = AfterClear(f, report.ClearChanges, HttpsProxy) ?? AfterClear(f, report.ClearChanges, HttpProxy) ?? AfterClear(f, report.ClearChanges, AllProxy);
+            foreach (ProxyChange change in report.ClearChanges.Where(c => c.Target == ProxyChangeTarget.Environment))
+                report.ClearedVariables.Add(new KeyValuePair<string, string>(change.Key, AfterClear(f, report.ClearChanges, change.Key)));
             Summarize(f, report, envRow, proxyRow, systemRow, owner, systemDead);
 
             // 链路
@@ -161,12 +164,20 @@ namespace IP_UpdateTest.Core.TerminalProxy
             string key = tool.Tool.ToString().ToLowerInvariant();
             string title = ToolProxySetting.NameOf(tool.Tool);
             List<KeyValuePair<string, string>> values = tool.Values.Where(v => !ToolProxySetting.IsIgnored(tool.Tool, v.Key)).ToList();
+            if (tool.Tool == ProxyTool.Git && IsGitProxyDisabled(tool))
+            {
+                return target != null
+                    ? new TerminalProxyRow(key, title, CheckStatus.Warning, "已禁用", "http.proxy 为空：Git 不走任何代理，也不读环境变量。一键设置会删除这一项")
+                    : new TerminalProxyRow(key, title, CheckStatus.Info, "直连", "http.proxy 为空：Git 不走任何代理，也不读环境变量");
+            }
             if (values.Count == 0)
             {
                 string env = f.EffectiveEnvironment(HttpsProxy) ?? f.EffectiveEnvironment(HttpProxy) ?? f.EffectiveEnvironment(AllProxy);
                 if (tool.Tool == ProxyTool.Pip && IsSocks(env))
                     return new TerminalProxyRow(key, title, CheckStatus.Warning, "不支持 SOCKS",
-                        "环境变量是 SOCKS 代理，pip 用不了（报 Missing dependencies for SOCKS support）：请改选 HTTP 端口，或在 pip.ini 中单独设置 HTTP 代理");
+                        "环境变量是 SOCKS 代理，pip 用不了（报 Missing dependencies for SOCKS support）："
+                        + (target != null && target.Http ? "一键设置会把环境变量改成 HTTP 代理"
+                            : target != null ? "请改选 HTTP 端口，或在 pip.ini 中单独设置 HTTP 代理" : "请在 pip.ini 中单独设置 HTTP 代理"));
                 if (tool.Values.Count > 0)
                 {
                     KeyValuePair<string, string> ignored = tool.Values.First();
@@ -181,12 +192,38 @@ namespace IP_UpdateTest.Core.TerminalProxy
             KeyValuePair<string, string> dead = values.FirstOrDefault(v => f.IsReachable(ProxySettings.UrlEndpoint(v.Value)) == false);
             if (dead.Key != null)
                 return new TerminalProxyRow(key, title, CheckStatus.Fail, "已失效", $"{dead.Key} = {dead.Value}，端口无响应：{title} 会连不上网（它优先于环境变量）{manual}");
+            if (tool.Tool == ProxyTool.Pip)
+            {
+                KeyValuePair<string, string> socks = values.FirstOrDefault(v => IsSocks(v.Value));
+                if (socks.Key != null)
+                    return new TerminalProxyRow(key, title, CheckStatus.Warning, "不支持 SOCKS", $"{socks.Key} = {socks.Value}：pip 用不了 SOCKS 代理（报 Missing dependencies for SOCKS support），"
+                        + (target != null && target.Http ? "一键设置会改成 HTTP 代理" : "请改成 HTTP 代理"));
+            }
+            // 只对某个网站生效、指向能连上的其他代理（如公司 Git 服务器走公司代理）是有意的分流，不算不一致
             KeyValuePair<string, string> other = target == null ? default(KeyValuePair<string, string>)
-                : values.FirstOrDefault(v => !SameEndpoint(ProxySettings.UrlEndpoint(v.Value), target.Endpoint));
+                : values.FirstOrDefault(v => !SameEndpoint(ProxySettings.UrlEndpoint(v.Value), target.Endpoint) && !IsSiteRoute(f, tool.Tool, v.Key, v.Value));
             if (other.Key != null)
                 return new TerminalProxyRow(key, title, CheckStatus.Warning, "不一致", $"{other.Key} = {other.Value}，优先于环境变量，与当前代理 {target.Endpoint} 不同{manual}");
             KeyValuePair<string, string> first = values.First();
             return new TerminalProxyRow(key, title, CheckStatus.Ok, "已生效", $"{first.Key} = {first.Value}");
+        }
+
+        /// <summary>
+        /// Git 的 http.proxy 设成了空值：不走任何代理，连环境变量也不读
+        /// </summary>
+        private static bool IsGitProxyDisabled(ToolProxySetting tool)
+        {
+            string value;
+            return tool.Values.TryGetValue("http.proxy", out value) && value.Length == 0;
+        }
+
+        /// <summary>
+        /// Git 只对某个网站生效的代理（http.&lt;url&gt;.proxy）指向能连上的、不在本机的代理：是用户有意的分流，一键设置不改它
+        /// </summary>
+        private static bool IsSiteRoute(TerminalProxySnapshot f, ProxyTool tool, string key, string value)
+        {
+            return tool == ProxyTool.Git && !string.Equals(key, "http.proxy", StringComparison.OrdinalIgnoreCase)
+                && !IsLoopback(value) && f.IsReachable(ProxySettings.UrlEndpoint(value)) != false;
         }
 
         private static void BuildApplyChanges(TerminalProxySnapshot f, ProxyCandidate target, string noProxy, List<ProxyChange> changes)
@@ -209,8 +246,11 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 if (tool.Tool != ProxyTool.Git && !target.Http) continue; // npm、pip 不支持 SOCKS
                 foreach (KeyValuePair<string, string> value in tool.Values)
                 {
-                    if (ToolProxySetting.IsIgnored(tool.Tool, value.Key)) continue;
-                    if (!SameUrl(value.Value, url))
+                    if (ToolProxySetting.IsIgnored(tool.Tool, value.Key) || IsSiteRoute(f, tool.Tool, value.Key, value.Value)) continue;
+                    // 空的 http.proxy 删掉，Git 就跟随环境变量
+                    if (value.Value.Length == 0)
+                        changes.Add(new ProxyChange(TargetOf(tool.Tool), value.Key, value.Value, null));
+                    else if (!SameUrl(value.Value, url))
                         changes.Add(new ProxyChange(TargetOf(tool.Tool), value.Key, value.Value, url));
                 }
             }
@@ -223,7 +263,9 @@ namespace IP_UpdateTest.Core.TerminalProxy
         {
             foreach (string name in ProxyVariables)
                 AddClear(changes, backup, ProxyChangeTarget.Environment, name, UserValue(f, name), true);
-            AddClear(changes, backup, ProxyChangeTarget.Environment, NoProxy, UserValue(f, NoProxy), false);
+            // 清除之后还有代理变量生效（如用户自己设的公司代理）时 NO_PROXY 留着，不然本机和内网地址也会走那个代理
+            if (ProxyVariables.All(name => AfterClear(f, changes, name) == null))
+                AddClear(changes, backup, ProxyChangeTarget.Environment, NoProxy, UserValue(f, NoProxy), false);
 
             foreach (ToolProxySetting tool in f.Tools)
             {
@@ -250,14 +292,30 @@ namespace IP_UpdateTest.Core.TerminalProxy
         {
             foreach (string name in ProxyVariables)
             {
-                ProxyChange change = clear.FirstOrDefault(c => c.Target == ProxyChangeTarget.Environment && string.Equals(c.Key, name, StringComparison.OrdinalIgnoreCase));
-                string user = change != null ? change.NewValue : UserValue(f, name);
-                string machine;
-                string value = user ?? (f.MachineEnvironment.TryGetValue(name, out machine) && !string.IsNullOrWhiteSpace(machine) ? machine.Trim() : null);
+                bool machine;
+                string value = AfterClear(f, clear, name, out machine);
                 if (value != null && f.IsReachable(ProxySettings.UrlEndpoint(value)) == false)
-                    return $"{name}{(user == null ? "（系统级）" : "")} = {value}";
+                    return $"{name}{(machine ? "（系统级）" : "")} = {value}";
             }
             return null;
+        }
+
+        /// <summary>
+        /// 清除之后新开的终端里这个变量的值：清除改到的用新值，没改到的照旧；用户级没有时是系统级的值（machine 为 true）
+        /// </summary>
+        private static string AfterClear(TerminalProxySnapshot f, List<ProxyChange> clear, string name, out bool machine)
+        {
+            ProxyChange change = clear.FirstOrDefault(c => c.Target == ProxyChangeTarget.Environment && string.Equals(c.Key, name, StringComparison.OrdinalIgnoreCase));
+            string user = change != null ? change.NewValue : UserValue(f, name);
+            string system = user == null ? MachineValue(f, name) : null;
+            machine = system != null;
+            return user ?? system;
+        }
+
+        private static string AfterClear(TerminalProxySnapshot f, List<ProxyChange> clear, string name)
+        {
+            bool machine;
+            return AfterClear(f, clear, name, out machine);
         }
 
         private static void Summarize(TerminalProxySnapshot f, TerminalProxyReport report, TerminalProxyRow envRow, TerminalProxyRow proxyRow,
@@ -273,9 +331,10 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 {
                     report.Overall = CheckStatus.Fail;
                     report.Title = "命令行代理已失效";
-                    report.Detail = report.StaleAfterClear == null
-                        ? "环境变量指向的端口没有代理软件在监听，git、pip、curl 会连不上网。点“清除”恢复直连，或先启动代理软件再检测"
-                        : ManualFix(report.StaleAfterClear);
+                    report.Detail = report.StaleAfterClear != null ? ManualFix(report.StaleAfterClear)
+                        : "环境变量指向的端口没有代理软件在监听，git、pip、curl 会连不上网。"
+                            + (report.ProxyAfterClear != null ? $"点“清除”后改经 {report.ProxyAfterClear} 上网" : "点“清除”恢复直连")
+                            + "，或先启动代理软件再检测";
                 }
                 else if (badRows.Count > 0)
                 {
@@ -304,21 +363,26 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 return;
             }
 
-            if (envRow.Status == CheckStatus.Warning && envRow.Badge == "未设置")
+            List<TerminalProxyRow> manual = badRows.Where(r => !WillFix(r, report.ApplyChanges)).ToList();
+            if (envRow.Status == CheckStatus.Warning && envRow.Badge == "未设置" && manual.Count == 0)
             {
-                report.Overall = CheckStatus.Warning;
+                // 只有一键设置真能全部改正时才这么说；Git 等自己的设置也有问题时一并提到
+                string others = string.Join("、", badRows.Where(r => r != envRow).Select(r => r.Title));
+                bool pipBreaks = !target.Http && f.Tools.Any(t => t.Tool == ProxyTool.Pip && t.Installed && t.Values.Count == 0);
+                report.Overall = anyFail ? CheckStatus.Fail : CheckStatus.Warning;
                 report.Title = "命令行还没有走代理";
                 report.Detail = (owner ?? "代理软件") + (f.SystemProxyEnabled && !systemDead ? " 只设置了系统代理：浏览器能用，但" : " 没有设置命令行代理：")
-                    + "git、curl、npm 等命令行工具只认环境变量。一键设置后，新开的终端即可走代理";
+                    + "git、curl、npm 等命令行工具只认环境变量。一键设置后，新开的终端即可走代理"
+                    + (others.Length > 0 ? $"，{others} 自己的代理设置也会一并改正" : "")
+                    + (pipBreaks ? "。注意：只有 SOCKS 端口，设置后 pip 用不了，需在 pip.ini 中单独设置 HTTP 代理" : "");
             }
             else if (badRows.Count > 0)
             {
-                List<TerminalProxyRow> manual = badRows.Where(r => !WillFix(r, report.ApplyChanges)).ToList();
                 int fixable = badRows.Count - manual.Count;
                 report.Overall = anyFail ? CheckStatus.Fail : CheckStatus.Warning;
                 report.Title = anyFail ? "命令行代理设置已失效" : fixable == 0 ? "部分命令行工具需要手动设置" : "部分命令行设置与当前代理不一致";
                 if (manual.Count == 0)
-                    report.Detail = $"有 {badRows.Count} 项没有指向当前代理 {target.Endpoint}，一键设置可全部改正";
+                    report.Detail = $"有 {badRows.Count} 项设置与当前代理 {target.Endpoint} 不匹配，一键设置可全部改正";
                 else
                     report.Detail = (fixable > 0 ? $"一键设置可改正 {fixable} 项；" : "") + manual[0].Title + "：" + manual[0].Detail;
             }
@@ -356,7 +420,9 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 case "env": return changes.Any(c => c.Target == ProxyChangeTarget.Environment && c.Key != NoProxy);
                 case "git": return changes.Any(c => c.Target == ProxyChangeTarget.Git);
                 case "npm": return changes.Any(c => c.Target == ProxyChangeTarget.Npm);
-                case "pip": return changes.Any(c => c.Target == ProxyChangeTarget.Pip);
+                // pip 跟随的环境变量是 SOCKS 代理时，一键设置把它改成 HTTP 代理也就好了
+                case "pip": return changes.Any(c => c.Target == ProxyChangeTarget.Pip)
+                    || (row.Badge == "不支持 SOCKS" && changes.Any(c => c.Target == ProxyChangeTarget.Environment && c.Key == HttpsProxy && c.NewValue != null && !IsSocks(c.NewValue)));
                 default: return false;
             }
         }
@@ -392,6 +458,12 @@ namespace IP_UpdateTest.Core.TerminalProxy
         {
             string value;
             return f.UserEnvironment.TryGetValue(name, out value) && !string.IsNullOrWhiteSpace(value) ? value.Trim() : null;
+        }
+
+        private static string MachineValue(TerminalProxySnapshot f, string name)
+        {
+            string value;
+            return f.MachineEnvironment.TryGetValue(name, out value) && !string.IsNullOrWhiteSpace(value) ? value.Trim() : null;
         }
 
         private static bool IsSocks(string url)

@@ -1,5 +1,7 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 using IP_UpdateTest.Core.TerminalProxy;
 
 namespace IP_UpdateTest
@@ -21,6 +23,8 @@ namespace IP_UpdateTest
             FrmTerminalProxy open = OwnedForms.OfType<FrmTerminalProxy>().FirstOrDefault(f => !f.IsDisposed);
             if (open != null)
             {
+                // Activate 不会还原最小化的窗口
+                if (open.WindowState == FormWindowState.Minimized) open.WindowState = FormWindowState.Normal;
                 open.Activate();
                 return;
             }
@@ -28,6 +32,8 @@ namespace IP_UpdateTest
             {
                 SaveSettings();
                 SetFollowSystemProxy(enabled);
+                // 用户关掉跟随：忘掉同步到的状态，下次开启时第一次读到的状态只作为基准
+                if (!enabled) Task.Run(() => TerminalProxyConfigurator.SaveFollowState(null));
             }).Show(this);
         }
 

@@ -35,14 +35,27 @@ jobs:
           $version = ([xml](Get-Content IP_UpdateTest/IP_UpdateTest.csproj -Raw)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
           if (-not $version) { throw 'IP_UpdateTest.csproj 中没有 <Version>' }
           $tag = "v$version"
-          # 只有推送到 main（或在 main 上手动运行）且该版本还没有 Release 时才发布
-          $release = $false
-          if ($env:GITHUB_EVENT_NAME -ne 'pull_request' -and $env:GITHUB_REF -eq 'refs/heads/main') {
-            $output = gh release view $tag --json tagName 2>&1
-            if ($LASTEXITCODE -eq 0) { "$tag 已发布，本次只构建" }
-            elseif ("$output" -match 'not found') { $release = $true; "$tag 尚未发布，本次将发布" }
-            else { throw "查询 Release 失败：$output" }
+          $output = gh release view $tag --json tagName 2>&1
+          if ($LASTEXITCODE -eq 0) { $isNew = $false; "$tag 已发布，本次只构建" }
+          elseif ("$output" -match 'not found') { $isNew = $true; "$tag 是新版本" }
+          else { throw "查询 Release 失败：$output" }
+          # 新版本在 PR 阶段就检查，避免合并后才发现发布不了或发布出错
+          if ($isNew) {
+            # CHANGELOG.md 中要有本版本的小节，作为 Release 说明
+            if (-not (Select-String -Path CHANGELOG.md -Encoding utf8 -Pattern "^## \[?$([regex]::Escape($tag))\]?(\s|$)" -Quiet)) {
+              throw "CHANGELOG.md 中没有 “## $tag” 小节"
+            }
+            # 版本号要高于最新的 Release，避免版本倒退
+            $latest = gh release view --json tagName --jq .tagName 2>$null
+            if ($LASTEXITCODE -eq 0 -and $latest) {
+              $old = $null; $new = $null
+              if ([version]::TryParse($latest.TrimStart('v'), [ref]$old) -and [version]::TryParse($version, [ref]$new) -and $new -le $old) {
+                throw "版本 $version 不高于最新 Release $latest"
+              }
+            }
           }
+          # 只有推送到 main（或在 main 上手动运行）时才发布
+          $release = $isNew -and $env:GITHUB_EVENT_NAME -ne 'pull_request' -and $env:GITHUB_REF -eq 'refs/heads/main'
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "release=$($release.ToString().ToLower())" >> $env:GITHUB_OUTPUT

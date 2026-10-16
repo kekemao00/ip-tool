@@ -66,7 +66,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
                     List<ProxyChange> changes = Decide(f, TerminalProxyConfigurator.LoadBackup());
                     if (changes.Count > 0)
                     {
-                        List<string> errors = TerminalProxyConfigurator.Apply(changes, !enabled);
+                        List<string> errors = TerminalProxyConfigurator.Apply(changes, !enabled, true);
                         if (errors.Count > 0)
                         {
                             // 不记下这个状态，下次检查重试
@@ -96,7 +96,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
 
         internal static string Message(List<ProxyChange> changes, bool enabled)
         {
-            ProxyChange proxy = changes.FirstOrDefault(c => c.NewValue != null && c.Key != TerminalProxyAnalyzer.NoProxy);
+            ProxyChange proxy = changes.FirstOrDefault(c => !string.IsNullOrEmpty(c.NewValue) && c.Key != TerminalProxyAnalyzer.NoProxy);
             if (!enabled) return proxy != null ? "系统代理已关闭，命令行代理已恢复为 " + proxy.NewValue : "系统代理已关闭，命令行代理已随之清除";
             return proxy != null ? "命令行代理已跟随系统代理改为 " + proxy.NewValue : "命令行代理与系统代理一致，已补上 NO_PROXY";
         }

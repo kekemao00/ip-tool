@@ -95,7 +95,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 report.Rows.Add(new TerminalProxyRow("winhttp", "WinHTTP · 系统服务", CheckStatus.Info, "已设置", winHttp));
 
             report.NoProxy = f.EffectiveEnvironment(NoProxy) ?? BuildNoProxy(f.SystemProxyBypass);
-            BuildApplyChanges(f, target, report.NoProxy, report.ApplyChanges);
+            BuildApplyChanges(f, target, report.NoProxy, backup, report.ApplyChanges);
             BuildClearChanges(f, backup, report.ClearChanges);
             report.StaleAfterClear = StaleAfterClear(f, report.ClearChanges);
             report.ProxyAfterClear = AfterClear(f, report.ClearChanges, HttpsProxy) ?? AfterClear(f, report.ClearChanges, HttpProxy) ?? AfterClear(f, report.ClearChanges, AllProxy);
@@ -163,13 +163,10 @@ namespace IP_UpdateTest.Core.TerminalProxy
         {
             string key = tool.Tool.ToString().ToLowerInvariant();
             string title = ToolProxySetting.NameOf(tool.Tool);
-            List<KeyValuePair<string, string>> values = tool.Values.Where(v => !ToolProxySetting.IsIgnored(tool.Tool, v.Key)).ToList();
-            if (tool.Tool == ProxyTool.Git && IsGitProxyDisabled(tool))
-            {
-                return target != null
-                    ? new TerminalProxyRow(key, title, CheckStatus.Warning, "已禁用", "http.proxy 为空：Git 不走任何代理，也不读环境变量。一键设置会删除这一项")
-                    : new TerminalProxyRow(key, title, CheckStatus.Info, "直连", "http.proxy 为空：Git 不走任何代理，也不读环境变量");
-            }
+            // 空的 http.proxy 不是代理地址，单独处理；只对某个网站生效的代理仍要照常检查
+            List<KeyValuePair<string, string>> values = tool.Values.Where(v => !ToolProxySetting.IsIgnored(tool.Tool, v.Key) && v.Value.Length > 0).ToList();
+            bool disabled = tool.Tool == ProxyTool.Git && IsGitProxyDisabled(tool);
+            if (values.Count == 0 && disabled) return DisabledRow(key, title, target, false);
             if (values.Count == 0)
             {
                 string env = f.EffectiveEnvironment(HttpsProxy) ?? f.EffectiveEnvironment(HttpProxy) ?? f.EffectiveEnvironment(AllProxy);
@@ -204,8 +201,17 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 : values.FirstOrDefault(v => !SameEndpoint(ProxySettings.UrlEndpoint(v.Value), target.Endpoint) && !IsSiteRoute(f, tool.Tool, v.Key, v.Value));
             if (other.Key != null)
                 return new TerminalProxyRow(key, title, CheckStatus.Warning, "不一致", $"{other.Key} = {other.Value}，优先于环境变量，与当前代理 {target.Endpoint} 不同{manual}");
+            if (disabled) return DisabledRow(key, title, target, true);
             KeyValuePair<string, string> first = values.First();
             return new TerminalProxyRow(key, title, CheckStatus.Ok, "已生效", $"{first.Key} = {first.Value}");
+        }
+
+        private static TerminalProxyRow DisabledRow(string key, string title, ProxyCandidate target, bool siteRoutes)
+        {
+            string detail = siteRoutes ? "http.proxy 为空：除了单独设置了代理的网站，Git 不走任何代理，也不读环境变量" : "http.proxy 为空：Git 不走任何代理，也不读环境变量";
+            return target != null
+                ? new TerminalProxyRow(key, title, CheckStatus.Warning, "已禁用", detail + "。一键设置会改成当前代理，清除时恢复为空")
+                : new TerminalProxyRow(key, title, CheckStatus.Info, "直连", detail);
         }
 
         /// <summary>
@@ -226,7 +232,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 && !IsLoopback(value) && f.IsReachable(ProxySettings.UrlEndpoint(value)) != false;
         }
 
-        private static void BuildApplyChanges(TerminalProxySnapshot f, ProxyCandidate target, string noProxy, List<ProxyChange> changes)
+        private static void BuildApplyChanges(TerminalProxySnapshot f, ProxyCandidate target, string noProxy, TerminalProxyBackup backup, List<ProxyChange> changes)
         {
             if (target == null) return;
             string url = target.Url;
@@ -246,11 +252,12 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 if (tool.Tool != ProxyTool.Git && !target.Http) continue; // npm、pip 不支持 SOCKS
                 foreach (KeyValuePair<string, string> value in tool.Values)
                 {
-                    if (ToolProxySetting.IsIgnored(tool.Tool, value.Key) || IsSiteRoute(f, tool.Tool, value.Key, value.Value)) continue;
-                    // 空的 http.proxy 删掉，Git 就跟随环境变量
-                    if (value.Value.Length == 0)
-                        changes.Add(new ProxyChange(TargetOf(tool.Tool), value.Key, value.Value, null));
-                    else if (!SameUrl(value.Value, url))
+                    if (ToolProxySetting.IsIgnored(tool.Tool, value.Key)) continue;
+                    // 用户有意的按网站分流不改；本程序写过的（如清除时恢复的原值）照常跟着改
+                    bool ours = backup != null && backup.Wrote(TerminalProxyBackup.KeyOf(TargetOf(tool.Tool), value.Key), value.Value);
+                    if (!ours && IsSiteRoute(f, tool.Tool, value.Key, value.Value)) continue;
+                    // 空的 http.proxy 也改成当前代理（原来的空值会备份，清除时恢复）
+                    if (!SameUrl(value.Value, url))
                         changes.Add(new ProxyChange(TargetOf(tool.Tool), value.Key, value.Value, url));
                 }
             }

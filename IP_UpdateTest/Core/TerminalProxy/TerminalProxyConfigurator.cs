@@ -34,9 +34,10 @@ namespace IP_UpdateTest.Core.TerminalProxy
         }
 
         /// <summary>
-        /// 逐项执行，返回失败的项及原因（全部成功时为空）。clearing 为 true 表示这是“清除”
+        /// 逐项执行，返回失败的项及原因（全部成功时为空）。clearing 为 true 表示这是“清除”，
+        /// following 为 true 表示是跟随系统代理做的
         /// </summary>
-        public static List<string> Apply(IList<ProxyChange> changes, bool clearing)
+        public static List<string> Apply(IList<ProxyChange> changes, bool clearing, bool following = false)
         {
             lock (Gate)
             {
@@ -94,8 +95,14 @@ namespace IP_UpdateTest.Core.TerminalProxy
 
                 if (clearing && done.Count > 0)
                 {
-                    // 已恢复的项不再需要备份；没改成的留着，下次清除还能恢复
-                    foreach (ProxyChange change in done) backup.Forget(TerminalProxyBackup.KeyOf(change.Target, change.Key));
+                    // 已恢复的项不再需要备份；没改成的留着，下次清除还能恢复。
+                    // 跟随系统代理关闭时恢复的 Git / npm / pip 原值仍记作本程序管理的：系统代理再开时要把它改回代理，原值照旧留着
+                    foreach (ProxyChange change in done)
+                    {
+                        string key = TerminalProxyBackup.KeyOf(change.Target, change.Key);
+                        if (following && change.Target != ProxyChangeTarget.Environment && change.NewValue != null) backup.Record(key, change.OldValue, change.NewValue);
+                        else backup.Forget(key);
+                    }
                     SaveBackup(backup, null);
                 }
                 else if (!clearing && done.Count < changes.Count)

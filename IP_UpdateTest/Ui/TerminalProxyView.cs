@@ -479,6 +479,13 @@ namespace IP_UpdateTest.Ui
                 string text = layer.Value ?? "";
                 if (text.Length == 0) continue;
                 List<string> lines = Lines(text, maxWidth, s);
+                // 框的高度有上限：放不下的行不画，最后一行加省略号
+                int fit = Math.Max(1, (int)((Height - Px(20)) / lineHeight));
+                if (lines.Count > fit)
+                {
+                    lines = lines.GetRange(0, fit);
+                    lines[fit - 1] += "…";
+                }
                 float y = (Height - lines.Count * lineHeight) / 2 + (float)layer.OffsetY * s;
                 foreach (string line in lines)
                 {

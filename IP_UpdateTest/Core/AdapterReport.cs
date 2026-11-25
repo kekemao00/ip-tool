@@ -46,8 +46,14 @@ namespace IP_UpdateTest.Core
                     Line(sb, "租约到期", Format(a.DhcpLeaseExpires));
                 }
 
-                List<string> ipv6 = a.IPv6Addresses;
-                for (int i = 0; i < ipv6.Count; i++) Line(sb, i == 0 ? "IPv6" : "", ipv6[i]);
+                // 报表列出全部地址（含所有临时地址和即将停用的），标明类别
+                List<Ipv6AddressInfo> ipv6 = a.Ipv6LiveAddresses.OrderBy(x => (int)x.Kind).ToList();
+                for (int i = 0; i < ipv6.Count; i++)
+                {
+                    Ipv6AddressInfo x = ipv6[i];
+                    string state = x.State == System.Net.NetworkInformation.DuplicateAddressDetectionState.Deprecated ? "，即将停用" : "";
+                    Line(sb, i == 0 ? "IPv6" : "", $"{x.Address}/{x.PrefixLength}（{Ipv6Status.NameOf(x)}{state}）");
+                }
                 if (!a.CanConfigure && a.ReadOnlyReason != null) Line(sb, "说明", a.ReadOnlyReason);
             }
             return sb.ToString();

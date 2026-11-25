@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 
 namespace IP_UpdateTest.Core
 {
@@ -35,7 +36,7 @@ namespace IP_UpdateTest.Core
                 IPAddress ip;
                 if (!Ipv6Validator.TryParse(old.Address, out ip)) continue;
                 if (ip.Equals(address) && old.PrefixLength == prefix) keepAddress = true;
-                else commands.Add($"{DeletePrefix}address interface={interfaceIndex} address={ip}");
+                else commands.Add(DeleteAddressCommand(interfaceIndex, ip));
             }
             bool keepGateway = false;
             foreach (string old in manualGateways)
@@ -55,6 +56,26 @@ namespace IP_UpdateTest.Core
             else if (dnsIsStatic)
                 commands.Add($"interface ipv6 set dnsservers name={interfaceIndex} source=dhcp");
             return commands;
+        }
+
+        public static string DeleteAddressCommand(int interfaceIndex, IPAddress address)
+        {
+            return $"{DeletePrefix}address interface={interfaceIndex} address={address}";
+        }
+
+        /// <summary>
+        /// 等重复地址检测（DAD，约 1 秒）出结果：read 读取地址现在的状态，读不到时返回 null。
+        /// 返回检测结果；检测超时仍未结束、或一直读不到这个地址时返回 null（当作没有冲突）
+        /// </summary>
+        internal static DuplicateAddressDetectionState? WaitForDad(Func<DuplicateAddressDetectionState?> read, int attempts, Action wait)
+        {
+            for (int i = 0; i < attempts; i++)
+            {
+                DuplicateAddressDetectionState? state = read();
+                if (state.HasValue && state.Value != DuplicateAddressDetectionState.Tentative) return state;
+                if (i < attempts - 1) wait();
+            }
+            return null;
         }
 
         /// <summary>

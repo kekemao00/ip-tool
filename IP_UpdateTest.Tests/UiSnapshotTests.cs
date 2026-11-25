@@ -93,6 +93,17 @@ namespace IP_UpdateTest.Tests
                 // IPv6 页：第一个网卡手动设置了 IPv6
                 form.ShowIpv6Page();
                 Save(form, "main-ipv6");
+
+                // 自动获取：有公网、临时、本地链接地址（完整的 8 段地址要能完整显示）
+                form.BindAdapterList(new List<NetworkAdapter> { Ipv6Adapter(true) });
+                Save(form, "main-ipv6-auto");
+
+                // 网络没有 IPv6（如虚拟机的 NAT 网络）：只有本地链接地址，给出说明而不是一片空白
+                form.BindAdapterList(new List<NetworkAdapter> { Ipv6Adapter(false) });
+                Save(form, "main-ipv6-none");
+                // 左侧卡片：放得下的地址不省略
+                TextBox ipv6List = Descendants(form).OfType<TextBox>().Single(t => t.Multiline && t.ReadOnly && t.ScrollBars == ScrollBars.None);
+                Assert.Contains("fe80::a32c:7c34:a627:f521", ipv6List.Text);
             }
 
             // 管理员权限下（README 用）：没有提权提示条，标题栏显示“管理员”
@@ -297,6 +308,38 @@ namespace IP_UpdateTest.Tests
             };
         }
 
+        /// <summary>
+        /// 已连接、IPv6 自动获取的网卡；routable 为 false 时只有本地链接地址
+        /// </summary>
+        private static NetworkAdapter Ipv6Adapter(bool routable)
+        {
+            var adapter = new NetworkAdapter
+            {
+                NetworkInterfaceID = routable ? "{C}" : "{D}",
+                Name = "以太网",
+                InterfaceDescription = routable ? "Intel(R) Ethernet Connection I219-V" : "vmxnet3 以太网适配器",
+                Status = AdapterStatus.Connected,
+                LinkSpeedBps = 1000000000,
+                IsPhysical = true,
+                IsDhcpEnabled = true,
+                ConfigBackend = BackendKind.Wmi,
+                InterfaceIndex = 7,
+                MacAddress = PhysicalAddress.Parse("00-0C-29-E8-CD-C0"),
+                Ipv6Enabled = true,
+                Ipv6ConfigKnown = true
+            };
+            if (routable)
+            {
+                adapter.Ipv6LiveAddresses.Add(new Ipv6AddressInfo("2408:8207:24a1:5c00:a32c:7c34:a627:f521", 64, Ipv6AddressKind.Global));
+                adapter.Ipv6LiveAddresses.Add(new Ipv6AddressInfo("2408:8207:24a1:5c00:9f3c:11d2:6b0e:4a7d", 64, Ipv6AddressKind.Temporary));
+                adapter.Ipv6LiveAddresses.Add(new Ipv6AddressInfo("2408:8207:24a1:5c00:1d4e:88a0:3c71:e2b9", 64, Ipv6AddressKind.Temporary));
+                adapter.Ipv6LiveGateways.Add("fe80::1");
+                adapter.Ipv6LiveDns.AddRange(new[] { "2408:8000:1010:1::8", "2408:8000:1010:2::8" });
+            }
+            adapter.Ipv6LiveAddresses.Add(new Ipv6AddressInfo("fe80::a32c:7c34:a627:f521", 64, Ipv6AddressKind.LinkLocal));
+            return adapter;
+        }
+
         private void Open(Form form)
         {
             form.StartPosition = FormStartPosition.Manual;
@@ -317,7 +360,7 @@ namespace IP_UpdateTest.Tests
             form.Invalidate(true);
             form.Update();
             Pump(150, null);
-            AssertPlaceholdersFit(form, name);
+            AssertTextFits(form, name);
             using (Bitmap bitmap = WindowCapture.Client(form))
             {
                 Assert.True(bitmap.Width > 100 && bitmap.Height > 100);
@@ -328,22 +371,40 @@ namespace IP_UpdateTest.Tests
         }
 
         /// <summary>
-        /// 输入框的占位提示是原生的，放不下时直接截断、没有省略号：要求完整显示（含未显示的那一页和打开着的面板）
+        /// 原生输入框里的文字放不下时直接截断、没有省略号：输入框的占位提示、不能滚动的只读信息（如 IPv6 地址）
+        /// 都要完整显示（含未显示的那一页和打开着的面板）
         /// </summary>
-        private static void AssertPlaceholdersFit(Control root, string name)
+        private static void AssertTextFits(Control root, string name)
         {
             foreach (Control c in root.Controls)
             {
                 var field = c as FieldBox;
                 if (field != null && field.Placeholder.Length > 0)
+                    AssertFits(field.Box, field.Placeholder, name, "占位提示");
+                var box = c as TextBox;
+                if (box != null && box.ReadOnly && box.ScrollBars == ScrollBars.None)
                 {
-                    // 原生输入框左右各有几像素的内边距
-                    int available = field.Box.ClientSize.Width - 6;
-                    int needed = TextRenderer.MeasureText(field.Placeholder, field.Box.Font, Size.Empty, TextFormatFlags.NoPadding).Width;
-                    Assert.True(needed <= available, $"{name}：占位提示“{field.Placeholder}”放不下（需要 {needed}px，只有 {available}px）");
+                    foreach (string line in box.Lines) AssertFits(box, line, name, "文字");
                 }
-                AssertPlaceholdersFit(c, name);
+                AssertTextFits(c, name);
             }
+        }
+
+        private static IEnumerable<Control> Descendants(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                yield return c;
+                foreach (Control d in Descendants(c)) yield return d;
+            }
+        }
+
+        private static void AssertFits(TextBox box, string text, string name, string what)
+        {
+            // 原生输入框左右各有几像素的内边距
+            int available = box.ClientSize.Width - 6;
+            int needed = TextRenderer.MeasureText(text, box.Font, Size.Empty, TextFormatFlags.NoPadding).Width;
+            Assert.True(needed <= available, $"{name}：{what}“{text}”放不下（需要 {needed}px，只有 {available}px）");
         }
 
         private void CloseSheets(ThemedForm form)

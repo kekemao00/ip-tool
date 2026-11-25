@@ -68,11 +68,6 @@ namespace IP_UpdateTest
         private string selectedAdapterId;
 
         /// <summary>
-        /// 表单被用户修改过、尚未应用
-        /// </summary>
-        private bool isDirty;
-
-        /// <summary>
         /// 正在用代码填充表单，忽略期间的修改事件
         /// </summary>
         private bool isLoadingFields;
@@ -189,6 +184,7 @@ namespace IP_UpdateTest
             cbxNetworkAdapter.Format = o => ((NetworkAdapter)o).Name;
             cbxNetworkAdapter.Detail = o => ((NetworkAdapter)o).StatusText;
             cbxNetworkAdapter.ItemGlyph = o => AdapterGlyph((NetworkAdapter)o);
+            WireIpv6Events();
         }
 
         private static Glyph AdapterGlyph(NetworkAdapter adapter)
@@ -200,7 +196,7 @@ namespace IP_UpdateTest
 
         private void ApplyHints()
         {
-            txtIpAddress.Placeholder = "如 192.168.1.10，也可输入 192.168.1.10/24";
+            txtIpAddress.Placeholder = "如 192.168.1.10，可带 /24";
             txtMask.Placeholder = "如 255.255.255.0";
             txtGateway.Placeholder = "可留空";
             txtDnsMain.Placeholder = "如 223.5.5.5";
@@ -403,6 +399,7 @@ namespace IP_UpdateTest
                 txtDhcpServer.Text = has && adapter.IsDhcpEnabled && adapter.DhcpServer.Length > 0 ? adapter.DhcpServer : "-";
                 List<string> ipv6 = has ? adapter.IPv6Addresses : new List<string>();
                 txtIPv6.Text = ipv6.Count > 0 ? string.Join(Environment.NewLine, ipv6) : "-";
+                ShowIpv6(adapter);
 
                 bool dhcp = !has || adapter.IsDhcpEnabled;
                 segIpMode.SelectedIndex = dhcp ? 0 : 1;
@@ -416,7 +413,7 @@ namespace IP_UpdateTest
                 bool disabled = has && adapter.Status == AdapterStatus.Disabled;
                 btnToggleAdapter.Text = disabled ? "启用" : "禁用";
 
-                isDirty = false;
+                ipv4Dirty = ipv6Dirty = false;
             }
             finally
             {
@@ -454,9 +451,10 @@ namespace IP_UpdateTest
             txtDnsBackup.Enabled = editable && manualDns;
             btnDnsPreset.Enabled = editable;
             btnDnsBenchmark.Enabled = idle;
+            UpdateIpv6States(idle, adapter);
 
-            btnApply.Enabled = editable && isDirty;
-            btnRevert.Enabled = idle && isDirty;
+            btnApply.Enabled = editable && IsDirty;
+            btnRevert.Enabled = idle && IsDirty;
             cbxNetworkAdapter.Enabled = idle;
             chkShowAll.Enabled = idle;
             btnRefresh.Enabled = idle;
@@ -467,7 +465,7 @@ namespace IP_UpdateTest
 
         private async void btnRefresh_Click(object sender, EventArgs e)
         {
-            if (isDirty && !await ConfirmAsync(btnRefresh, "刷新", "刷新会放弃尚未应用的修改，确定刷新？", "刷新")) return;
+            if (IsDirty && !await ConfirmAsync(btnRefresh, "刷新", "刷新会放弃尚未应用的修改，确定刷新？", "刷新")) return;
             SetStatus("");
             await RefreshAdaptersAsync();
         }
@@ -509,16 +507,17 @@ namespace IP_UpdateTest
             MarkDirty();
         }
 
-        private void MarkDirty()
+        private void MarkDirty(bool ipv6 = false)
         {
-            isDirty = true;
+            if (ipv6) ipv6Dirty = true;
+            else ipv4Dirty = true;
             UpdateControlStates();
             SetStatus("有未应用的修改：按 Enter 应用，Esc 还原");
         }
 
         private void ClearErrors()
         {
-            foreach (FieldBox box in EditableFields) box.SetError(null, false);
+            foreach (FieldBox box in EditableFields.Concat(Ipv6Fields)) box.SetError(null, false);
         }
 
         private void txtIpAddress_Leave(object sender, EventArgs e)
@@ -587,6 +586,7 @@ namespace IP_UpdateTest
         /// </summary>
         private void ShowRequest(IpConfigRequest request)
         {
+            segFamily.SelectedIndex = 0;
             isLoadingFields = true;
             try
             {
@@ -654,35 +654,36 @@ namespace IP_UpdateTest
                 return;
             }
 
-            NormalizeCidrInput();
-            IpConfigRequest request = BuildRequest();
-            List<ValidationError> errors = request.Validate();
-            ShowValidationErrors(errors);
-            if (errors.Count > 0)
-            {
-                SetStatus("请先修正标红的输入项：" + errors[0].Message, StatusKind.Error);
-                FieldOf(errors[0].Field).FocusInput();
-                return;
-            }
-
-            // 提权前先确认这次修改能做，免得白白弹出 UAC
-            string unsupported = AdapterService.CheckSupported(adapter, request);
-            if (unsupported != null)
-            {
-                await AlertAsync(btnApply, "无法应用", unsupported);
-                return;
-            }
+            // 只应用改动过的协议：没改的那个不重设，避免无谓的断网
+            IpConfigRequest request = ipv4Dirty ? await PrepareIpv4Async() : null;
+            if (ipv4Dirty && request == null) return;
+            Ipv6ConfigRequest request6 = ipv6Dirty ? await PrepareIpv6Async() : null;
+            if (ipv6Dirty && request6 == null) return;
 
             if (!await EnsureAdministratorAsync(btnApply)) return;
             if (IsPrimaryAdapter(adapter)
                 && !await ConfirmAsync(btnApply, "修改上网网卡", $"“{adapter.Name}”是当前上网使用的网卡，应用期间网络可能短暂中断。确定继续？", "继续应用"))
                 return;
-            if (!await ConfirmNoIpConflictAsync(adapter, request)) return;
+            if (request != null && !await ConfirmNoIpConflictAsync(adapter, request)) return;
 
-            ApplyResult result = await RunBusyAsync("正在应用配置…", () => AdapterService.Apply(adapter, request), btnApply);
+            bool ipv4Applied = false;
+            ApplyResult result = await RunBusyAsync("正在应用配置…", () =>
+            {
+                if (request != null)
+                {
+                    ApplyResult result4 = AdapterService.Apply(adapter, request);
+                    if (!result4.Success) return result4;
+                    ipv4Applied = true;
+                }
+                if (request6 == null) return ApplyResult.Ok();
+                ApplyResult result6 = AdapterService.ApplyIpv6(adapter, request6);
+                return result6.Success || request == null ? result6 : ApplyResult.Fail("IPv4 配置已应用，IPv6 应用失败：" + result6.Message);
+            }, btnApply);
             if (IsDisposed) return;
             if (!result.Success)
             {
+                if (ipv4Applied) ipv4Dirty = false;
+                UpdateControlStates();
                 btnApply.Fail("应用失败");
                 SetStatus("应用失败：" + result.Message, StatusKind.Error);
                 await AlertAsync(btnApply, "应用失败", result.Message);
@@ -690,11 +691,62 @@ namespace IP_UpdateTest
             }
 
             btnApply.Succeed();
-            isDirty = false;
+            ipv4Dirty = ipv6Dirty = false;
             UpdateControlStates();
             string note = adapter.ConfigNote == null ? "" : "。" + adapter.ConfigNote;
             SetStatus($"已应用到 {adapter.Name}（{DateTime.Now:HH:mm:ss}）{note}", StatusKind.Success);
             ScheduleRefresh(RefreshAfterApplyMilliseconds);
+        }
+
+        /// <summary>
+        /// 校验 IPv4 页并确认这次修改能做（提权前检查，免得白白弹出 UAC）；不能应用时返回 null
+        /// </summary>
+        private async Task<IpConfigRequest> PrepareIpv4Async()
+        {
+            NormalizeCidrInput();
+            IpConfigRequest request = BuildRequest();
+            List<ValidationError> errors = request.Validate();
+            ShowValidationErrors(errors);
+            if (errors.Count > 0)
+            {
+                segFamily.SelectedIndex = 0;
+                SetStatus("请先修正标红的输入项：" + errors[0].Message, StatusKind.Error);
+                FieldOf(errors[0].Field).FocusInput();
+                return null;
+            }
+
+            string unsupported = AdapterService.CheckSupported(SelectedAdapter, request);
+            if (unsupported != null)
+            {
+                await AlertAsync(btnApply, "无法应用", unsupported);
+                return null;
+            }
+            return request;
+        }
+
+        /// <summary>
+        /// 校验 IPv6 页；不能应用时返回 null
+        /// </summary>
+        private async Task<Ipv6ConfigRequest> PrepareIpv6Async()
+        {
+            Ipv6ConfigRequest request = BuildIpv6Request();
+            List<ValidationError> errors = request.Validate();
+            ShowIpv6ValidationErrors(errors);
+            if (errors.Count > 0)
+            {
+                segFamily.SelectedIndex = 1;
+                SetStatus("请先修正标红的 IPv6 输入项：" + errors[0].Message, StatusKind.Error);
+                Ipv6FieldOf(errors[0].Field).FocusInput();
+                return null;
+            }
+
+            string unsupported = AdapterService.CheckIpv6Supported(SelectedAdapter);
+            if (unsupported != null)
+            {
+                await AlertAsync(btnApply, "无法应用 IPv6", unsupported);
+                return null;
+            }
+            return request;
         }
 
         private void btnRevert_Click(object sender, EventArgs e)
@@ -919,6 +971,11 @@ namespace IP_UpdateTest
 
         private void btnDnsPreset_Click(object sender, EventArgs e)
         {
+            if (IsIpv6Page)
+            {
+                ShowIpv6DnsPresetMenu();
+                return;
+            }
             Menus.Clear(dnsPresetMenu);
             foreach (DnsCandidate preset in BuiltInAndCustomPresets())
             {
@@ -1005,6 +1062,7 @@ namespace IP_UpdateTest
 
         private void ApplyDnsPreset(string[] servers)
         {
+            segFamily.SelectedIndex = 0;
             if (!IsManualDns) segDnsMode.SelectedIndex = 1;
             txtDnsMain.Text = servers.Length > 0 ? servers[0] : "";
             txtDnsBackup.Text = servers.Length > 1 ? servers[1] : "";
@@ -1056,20 +1114,29 @@ namespace IP_UpdateTest
         private void StashPendingEdit()
         {
             NetworkAdapter adapter = SelectedAdapter;
-            if (isDirty && adapter != null)
+            if (IsDirty && adapter != null)
             {
                 try
                 {
                     new PendingEdit
                     {
                         AdapterId = adapter.NetworkInterfaceID,
+                        Ipv4Changed = ipv4Dirty,
                         IsDhcp = !IsStatic,
                         ManualDns = IsManualDns,
                         IpAddress = txtIpAddress.Text.Trim(),
                         SubnetMask = txtMask.Text.Trim(),
                         Gateway = txtGateway.Text.Trim(),
                         DnsMain = txtDnsMain.Text.Trim(),
-                        DnsBackup = txtDnsBackup.Text.Trim()
+                        DnsBackup = txtDnsBackup.Text.Trim(),
+                        Ipv6Changed = ipv6Dirty,
+                        Ipv6Manual = IsManualIpv6,
+                        Ipv6Address = txt6Address.Text.Trim(),
+                        Ipv6PrefixLength = txt6Prefix.Text.Trim(),
+                        Ipv6Gateway = txt6Gateway.Text.Trim(),
+                        Ipv6ManualDns = IsManualIpv6Dns,
+                        Ipv6DnsMain = txt6DnsMain.Text.Trim(),
+                        Ipv6DnsBackup = txt6DnsBackup.Text.Trim()
                     }.Save();
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
@@ -1094,10 +1161,26 @@ namespace IP_UpdateTest
                 || !string.Equals(pending.AdapterId, adapter.NetworkInterfaceID, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            string[] dns = IpConfigRequest.DnsList(pending.DnsMain, pending.DnsBackup);
-            ShowRequest(pending.IsDhcp
-                ? new IpConfigRequest { UseDhcp = true, UseDhcpDns = !pending.ManualDns, DnsServers = pending.ManualDns ? dns : new string[0] }
-                : IpConfigRequest.Static(pending.IpAddress, pending.SubnetMask, pending.Gateway, dns));
+            if (pending.Ipv4Changed)
+            {
+                string[] dns = IpConfigRequest.DnsList(pending.DnsMain, pending.DnsBackup);
+                ShowRequest(pending.IsDhcp
+                    ? new IpConfigRequest { UseDhcp = true, UseDhcpDns = !pending.ManualDns, DnsServers = pending.ManualDns ? dns : new string[0] }
+                    : IpConfigRequest.Static(pending.IpAddress, pending.SubnetMask, pending.Gateway, dns));
+            }
+            if (pending.Ipv6Changed)
+            {
+                ShowIpv6Request(new Ipv6ConfigRequest
+                {
+                    UseAuto = !pending.Ipv6Manual,
+                    Address = pending.Ipv6Address,
+                    PrefixLength = pending.Ipv6PrefixLength,
+                    Gateway = pending.Ipv6Gateway,
+                    UseAutoDns = !pending.Ipv6ManualDns,
+                    DnsServers = pending.Ipv6ManualDns ? Ipv6Validator.DnsList(pending.Ipv6DnsMain, pending.Ipv6DnsBackup) : new string[0]
+                });
+                if (!pending.Ipv4Changed) segFamily.SelectedIndex = 1;
+            }
             SetStatus("已恢复提权前填写的内容，确认无误后点“应用”");
         }
 
@@ -1246,14 +1329,24 @@ namespace IP_UpdateTest
             if (btnRevert.Enabled) list.Add(new PaletteCommand(config, "还原为网卡当前配置", Glyph.Undo, () => btnRevert.PerformClick()) { Hint = "Esc" });
             if (segIpMode.Enabled)
             {
-                list.Add(new PaletteCommand(config, "IP 改为自动获取（DHCP）", Glyph.Refresh, () => segIpMode.SelectedIndex = 0) { Keywords = "dhcp 自动" });
+                list.Add(new PaletteCommand(config, "IP 改为自动获取（DHCP）", Glyph.Refresh, () =>
+                {
+                    segFamily.SelectedIndex = 0;
+                    segIpMode.SelectedIndex = 0;
+                }) { Keywords = "dhcp 自动" });
                 if (segIpMode.IsItemEnabled(1)) list.Add(new PaletteCommand(config, "IP 改为手动设置", Glyph.Monitor, () =>
                 {
+                    segFamily.SelectedIndex = 0;
                     segIpMode.SelectedIndex = 1;
                     txtIpAddress.FocusInput();
                 }) { Keywords = "static 静态 手动" });
             }
-            if (btnDnsPreset.Enabled)
+            bool ipv6Page = IsIpv6Page;
+            list.Add(new PaletteCommand(config, ipv6Page ? "切换到 IPv4 设置" : "切换到 IPv6 设置", Glyph.Network, () => segFamily.SelectedIndex = ipv6Page ? 0 : 1)
+            {
+                Keywords = "ipv6 ipv4 v6 协议 前缀"
+            });
+            if (segDnsMode.Enabled)
             {
                 foreach (DnsCandidate preset in BuiltInAndCustomPresets())
                 {
@@ -1476,7 +1569,7 @@ namespace IP_UpdateTest
                 ScheduleRefresh(RefreshDebounceMilliseconds);
                 return;
             }
-            if (isDirty)
+            if (IsDirty)
             {
                 SetStatus("网络配置已变化，点击刷新查看最新配置（会放弃未应用的修改）");
                 return;

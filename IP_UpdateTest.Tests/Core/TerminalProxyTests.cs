@@ -963,5 +963,95 @@ namespace IP_UpdateTest.Tests.Core
             Assert.Equal("命令行已设置代理", report.Title);
             Assert.DoesNotContain("直连", report.Detail);
         }
+
+        [Theory]
+        [InlineData("socks5://127.0.0.1:1080", "127.0.0.1", 1080, false)]
+        [InlineData("socks5h://proxy.corp.com:1080", "proxy.corp.com", 1080, false)]
+        [InlineData("http://[::1]:8080", "::1", 8080, true)]
+        [InlineData("10.0.0.2:3128", "10.0.0.2", 3128, true)]
+        public void ManualProxy_ParsesUrls(string url, string host, int port, bool http)
+        {
+            ProxyCandidate c;
+            Assert.True(ProxyCandidate.TryParseManual(url, out c));
+            Assert.Equal(host, c.Host);
+            Assert.Equal(port, c.Port);
+            Assert.Equal(http, c.Http);
+            Assert.Equal(!http, c.Socks5);
+            Assert.True(c.IsManual);
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("ftp://10.0.0.2:21")]
+        [InlineData("socks5://127.0.0.1")]
+        [InlineData("http://bad host:80")]
+        public void ManualProxy_RejectsInvalid(string url)
+        {
+            ProxyCandidate c;
+            Assert.False(ProxyCandidate.TryParseManual(url, out c));
+        }
+
+        [Fact]
+        public void ManualProxy_RoundTripsThroughSettings()
+        {
+            var socks = new ProxyCandidate { Host = "::1", Port = 1080, Socks5 = true, IsManual = true };
+            Assert.Equal("socks5://[::1]:1080", socks.ManualUrl);
+            Assert.Equal("socks5h://[::1]:1080", socks.Url);
+
+            ProxyCandidate parsed;
+            Assert.True(ProxyCandidate.TryParseManual(socks.ManualUrl, out parsed));
+            Assert.Equal(socks.Endpoint, parsed.Endpoint);
+            Assert.True(parsed.Socks5);
+        }
+
+        [Fact]
+        public void ManualProxy_Reachable_SuggestsApplyWithIt()
+        {
+            TerminalProxySnapshot f = V2rayN();
+            var manual = new ProxyCandidate { Host = "10.0.0.2", Port = 3128, Http = true, IsManual = true };
+            f.Candidates.Add(manual);
+            f.Reachable["10.0.0.2:3128"] = true;
+            f.Tunnels["10.0.0.2:3128"] = 80;
+
+            TerminalProxyReport report = TerminalProxyAnalyzer.Analyze(f, manual, null);
+
+            Assert.Equal("命令行还没有走代理", report.Title);
+            Assert.DoesNotContain("v2rayN", report.Detail);
+            Assert.Contains("10.0.0.2:3128", report.Detail);
+            Assert.Equal("手动添加", report.Steps[0].Name);
+            Assert.Equal("手动添加 · HTTP", Row(report, "proxy").Title);
+            Assert.Equal(CheckStatus.Ok, Row(report, "proxy").Status);
+            Assert.All(report.ApplyChanges.Take(2), c => Assert.Equal("http://10.0.0.2:3128", c.NewValue));
+        }
+
+        [Fact]
+        public void ManualProxy_Unreachable_IsReported()
+        {
+            TerminalProxySnapshot f = V2rayN();
+            var manual = new ProxyCandidate { Port = 1081, Socks5 = true, IsManual = true };
+            f.Candidates.Add(manual);
+            f.Reachable["127.0.0.1:1081"] = false;
+
+            TerminalProxyReport report = TerminalProxyAnalyzer.Analyze(f, manual, null);
+
+            Assert.Equal(CheckStatus.Fail, report.Overall);
+            Assert.Equal("手动添加的代理连不上", report.Title);
+            Assert.Equal("连不上", Row(report, "proxy").Badge);
+            Assert.Equal(CheckStatus.Fail, report.Steps[1].Status);
+            // 仍可一键设置（如先设置好再建立隧道）
+            Assert.Equal("socks5h://127.0.0.1:1081", report.ApplyChanges.First().NewValue);
+        }
+
+        [Fact]
+        public void PickInitial_PrefersManualProxyTheEnvironmentUses()
+        {
+            TerminalProxySnapshot f = V2rayN();
+            var manual = new ProxyCandidate { Port = 1081, Socks5 = true, IsManual = true };
+            f.Candidates.Add(manual);
+            Assert.Equal(10809, TerminalProxyAnalyzer.PickInitial(f).Port);
+
+            f.UserEnvironment["HTTPS_PROXY"] = "socks5h://127.0.0.1:1081";
+            Assert.Same(manual, TerminalProxyAnalyzer.PickInitial(f));
+        }
     }
 }

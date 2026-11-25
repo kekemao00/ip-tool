@@ -19,6 +19,11 @@ namespace IP_UpdateTest.Core
         private static readonly string FilePath = Path.Combine(Path.GetTempPath(), "IPTool", "pending.json");
 
         [DataMember] public string AdapterId { get; set; }
+
+        /// <summary>
+        /// IPv4 页有改动；只改了 IPv6 时不回填 IPv4，免得应用时重设没改的配置
+        /// </summary>
+        [DataMember] public bool Ipv4Changed { get; set; }
         [DataMember] public bool IsDhcp { get; set; }
         [DataMember] public bool ManualDns { get; set; }
         [DataMember] public string IpAddress { get; set; }
@@ -26,6 +31,14 @@ namespace IP_UpdateTest.Core
         [DataMember] public string Gateway { get; set; }
         [DataMember] public string DnsMain { get; set; }
         [DataMember] public string DnsBackup { get; set; }
+        [DataMember] public bool Ipv6Changed { get; set; }
+        [DataMember] public bool Ipv6Manual { get; set; }
+        [DataMember] public string Ipv6Address { get; set; }
+        [DataMember] public string Ipv6PrefixLength { get; set; }
+        [DataMember] public string Ipv6Gateway { get; set; }
+        [DataMember] public bool Ipv6ManualDns { get; set; }
+        [DataMember] public string Ipv6DnsMain { get; set; }
+        [DataMember] public string Ipv6DnsBackup { get; set; }
         [DataMember] public DateTime SavedAt { get; set; }
 
         public void Save()

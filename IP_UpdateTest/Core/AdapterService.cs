@@ -60,6 +60,16 @@ namespace IP_UpdateTest.Core
         private const string TcpipInterfacesKey = @"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\";
 
         /// <summary>
+        /// 各网卡保存的 IPv6 配置（手动 DNS 在这里）
+        /// </summary>
+        private const string Tcpip6InterfacesKey = @"SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces\";
+
+        /// <summary>
+        /// MSFT_NetIPAddress / MSFT_NetRoute.AddressFamily：IPv6
+        /// </summary>
+        private const int AddressFamilyIPv6 = 23;
+
+        /// <summary>
         /// 读取网卡列表。包含 WMI 查询，耗时百毫秒级，请在后台线程调用。
         /// includeAll 为 false 时只返回物理网卡。
         /// </summary>
@@ -73,6 +83,7 @@ namespace IP_UpdateTest.Core
 
             Dictionary<string, WmiConfigState> configs = TryGetConfigurationStates();
             List<NetAdapterRecord> records = TryQueryNetAdapters();
+            ManualIpv6Config ipv6 = TryQueryManualIpv6();
             var result = new List<NetworkAdapter>();
 
             if (records == null)
@@ -89,6 +100,7 @@ namespace IP_UpdateTest.Core
                     adapter.IsPhysical = ethernetOrWifi;
                     ReadSavedConfig(adapter);
                     ApplyConfigState(adapter, configs);
+                    ApplyIpv6Config(adapter, ipv6);
                     result.Add(adapter);
                 }
             }
@@ -118,6 +130,7 @@ namespace IP_UpdateTest.Core
 
                     ReadSavedConfig(adapter);
                     ApplyConfigState(adapter, configs);
+                    ApplyIpv6Config(adapter, ipv6);
                     result.Add(adapter);
                 }
             }
@@ -287,6 +300,30 @@ namespace IP_UpdateTest.Core
         }
 
         /// <summary>
+        /// 检查该网卡能否修改 IPv6，不能时返回原因（纯函数，提权前即可检查）
+        /// </summary>
+        public static string CheckIpv6Supported(NetworkAdapter adapter)
+        {
+            if (!adapter.CanConfigure) return adapter.ReadOnlyReason ?? "该网卡不支持修改";
+            if (!adapter.Ipv6Enabled) return "该网卡未启用 IPv6：请在网卡属性中勾选“Internet 协议版本 6 (TCP/IPv6)”";
+            if (!adapter.Ipv6ConfigKnown) return "读取不到该网卡的 IPv6 配置（需要 Windows 8 及以上），无法修改";
+            if (adapter.InterfaceIndex < 0) return "找不到该网卡的接口索引";
+            return null;
+        }
+
+        /// <summary>
+        /// 把 IPv6 配置应用到网卡。耗时操作，请在后台线程调用
+        /// </summary>
+        public static ApplyResult ApplyIpv6(NetworkAdapter adapter, Ipv6ConfigRequest request)
+        {
+            List<ValidationError> errors = request.Validate();
+            if (errors.Count > 0) return ApplyResult.Fail(errors[0].Message);
+            string unsupported = CheckIpv6Supported(adapter);
+            if (unsupported != null) return ApplyResult.Fail(unsupported);
+            return Ipv6Backend.Apply(adapter.InterfaceIndex, adapter.Ipv6ManualAddresses, adapter.Ipv6ManualGateways, adapter.HasStaticIpv6Dns, request);
+        }
+
+        /// <summary>
         /// 当前上网网卡（默认路由所在网卡）的接口索引，无法确定时返回 -1
         /// </summary>
         public static int GetPrimaryInterfaceIndex()
@@ -327,7 +364,8 @@ namespace IP_UpdateTest.Core
                 IPAddresses = ips.UnicastAddresses,
                 DhcpServerAddresses = ips.DhcpServerAddresses,
                 DnsAddresses = ips.DnsAddresses,
-                IsDhcpEnabled = ipv4 != null && ipv4.IsDhcpEnabled
+                IsDhcpEnabled = ipv4 != null && ipv4.IsDhcpEnabled,
+                Ipv6Enabled = nic.Supports(NetworkInterfaceComponent.IPv6)
             };
         }
 
@@ -356,6 +394,17 @@ namespace IP_UpdateTest.Core
             catch (Exception ex) when (ex is SecurityException || ex is IOException || ex is UnauthorizedAccessException)
             {
                 // 读不到保存的配置时只显示系统报告的地址
+            }
+
+            try
+            {
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(Tcpip6InterfacesKey + adapter.NetworkInterfaceID))
+                {
+                    if (key != null) adapter.ConfiguredIpv6Dns = SplitServers(key.GetValue("NameServer") as string);
+                }
+            }
+            catch (Exception ex) when (ex is SecurityException || ex is IOException || ex is UnauthorizedAccessException)
+            {
             }
         }
 
@@ -393,6 +442,71 @@ namespace IP_UpdateTest.Core
             {
                 adapter.DhcpLeaseObtained = state.LeaseObtained;
                 adapter.DhcpLeaseExpires = state.LeaseExpires;
+            }
+        }
+
+        private static void ApplyIpv6Config(NetworkAdapter adapter, ManualIpv6Config ipv6)
+        {
+            if (ipv6 == null) return;
+            adapter.Ipv6ConfigKnown = true;
+            List<Ipv6ManualAddress> addresses;
+            if (ipv6.Addresses.TryGetValue(adapter.InterfaceIndex, out addresses)) adapter.Ipv6ManualAddresses = addresses;
+            List<string> gateways;
+            if (ipv6.Gateways.TryGetValue(adapter.InterfaceIndex, out gateways)) adapter.Ipv6ManualGateways = gateways;
+        }
+
+        /// <summary>
+        /// 所有网卡手动设置的 IPv6 地址和默认网关，按接口索引分组；查询失败（Windows 7 等）时返回 null。
+        /// 持久存储里的是管理员设置的，路由器通告得到的只在活动存储中，且协议不是 NetMgmt
+        /// </summary>
+        private static ManualIpv6Config TryQueryManualIpv6()
+        {
+            try
+            {
+                var config = new ManualIpv6Config();
+                var scope = new ManagementScope(StandardCimv2);
+                // PrefixOrigin 1：手动
+                var addressQuery = new ObjectQuery("SELECT InterfaceIndex, IPAddress, PrefixLength FROM MSFT_NetIPAddress WHERE AddressFamily = "
+                    + AddressFamilyIPv6 + " AND PrefixOrigin = 1");
+                using (var searcher = new ManagementObjectSearcher(scope, addressQuery))
+                using (ManagementObjectCollection results = searcher.Get())
+                {
+                    foreach (ManagementObject mo in results)
+                    {
+                        using (mo)
+                        {
+                            string address = Ipv6Validator.Normalize(mo["IPAddress"] as string);
+                            List<Ipv6ManualAddress> list = config.AddressesOf(Convert.ToInt32(mo["InterfaceIndex"] ?? 0u));
+                            // 活动存储和持久存储各有一份
+                            if (address.Length > 0 && !list.Any(a => a.Address == address))
+                                list.Add(new Ipv6ManualAddress(address, Convert.ToInt32(mo["PrefixLength"] ?? (byte)0)));
+                        }
+                    }
+                }
+
+                var routeQuery = new ObjectQuery("SELECT InterfaceIndex, NextHop, Store, Protocol FROM MSFT_NetRoute WHERE AddressFamily = "
+                    + AddressFamilyIPv6 + " AND DestinationPrefix = '::/0'");
+                using (var searcher = new ManagementObjectSearcher(scope, routeQuery))
+                using (ManagementObjectCollection results = searcher.Get())
+                {
+                    foreach (ManagementObject mo in results)
+                    {
+                        using (mo)
+                        {
+                            // Store 0：持久存储；Protocol 3：NetMgmt（手动设置）
+                            bool manual = Convert.ToInt32(mo["Store"] ?? (byte)1) == 0 || Convert.ToInt32(mo["Protocol"] ?? (ushort)0) == 3;
+                            string nextHop = Ipv6Validator.Normalize(mo["NextHop"] as string);
+                            if (!manual || nextHop.Length == 0 || nextHop == "::") continue;
+                            List<string> list = config.GatewaysOf(Convert.ToInt32(mo["InterfaceIndex"] ?? 0u));
+                            if (!list.Contains(nextHop)) list.Add(nextHop);
+                        }
+                    }
+                }
+                return config;
+            }
+            catch (Exception ex) when (ex is ManagementException || ex is COMException || ex is UnauthorizedAccessException)
+            {
+                return null;
             }
         }
 
@@ -480,6 +594,26 @@ namespace IP_UpdateTest.Core
 
         [DllImport("iphlpapi.dll")]
         private static extern int GetBestInterface(uint destAddr, out uint bestIfIndex);
+
+        private sealed class ManualIpv6Config
+        {
+            public readonly Dictionary<int, List<Ipv6ManualAddress>> Addresses = new Dictionary<int, List<Ipv6ManualAddress>>();
+            public readonly Dictionary<int, List<string>> Gateways = new Dictionary<int, List<string>>();
+
+            public List<Ipv6ManualAddress> AddressesOf(int interfaceIndex)
+            {
+                List<Ipv6ManualAddress> list;
+                if (!Addresses.TryGetValue(interfaceIndex, out list)) Addresses[interfaceIndex] = list = new List<Ipv6ManualAddress>();
+                return list;
+            }
+
+            public List<string> GatewaysOf(int interfaceIndex)
+            {
+                List<string> list;
+                if (!Gateways.TryGetValue(interfaceIndex, out list)) Gateways[interfaceIndex] = list = new List<string>();
+                return list;
+            }
+        }
 
         private sealed class NetAdapterRecord
         {

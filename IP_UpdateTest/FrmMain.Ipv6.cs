@@ -130,7 +130,8 @@ namespace IP_UpdateTest
         private void Ipv6Mode_Changed(object sender, EventArgs e)
         {
             NetworkAdapter adapter = SelectedAdapter;
-            if (!isLoadingFields && IsManualIpv6 && adapter != null && !adapter.HasManualIpv6)
+            if (!isLoadingFields && IsManualIpv6 && adapter != null && !adapter.HasManualIpv6
+                && Ipv6Validator.Normalize(txt6Address.Text) == adapter.Ipv6Address)
             {
                 // 自动获取时显示的是路由器通告分配的地址，不能再手动加一遍；前缀长度和网关留着可以直接用
                 isLoadingFields = true;

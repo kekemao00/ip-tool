@@ -158,7 +158,7 @@ namespace IP_UpdateTest
                 return;
             }
             int width = txtIPv6.ClientSize.Width - P(6);
-            txtIPv6.Text = string.Join(Environment.NewLine, list.Select(a => FitIpv6Line(Ipv6Status.ShortNameOf(a) + "  ", a.Address, width)));
+            txtIPv6.Text = string.Join(Environment.NewLine, list.Select(a => FitIpv6Line(Ipv6Status.ShortNameOf(a) + " ", a.Address, width)));
             InkToolTip.Shared.SetToolTip(txtIPv6, string.Join("\n", list.Select(a => $"{Ipv6Status.NameOf(a)}  {a.Address}/{a.PrefixLength}")));
         }
 

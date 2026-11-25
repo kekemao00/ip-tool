@@ -101,6 +101,9 @@ namespace IP_UpdateTest.Tests
                 // 网络没有 IPv6（如虚拟机的 NAT 网络）：只有本地链接地址，给出说明而不是一片空白
                 form.BindAdapterList(new List<NetworkAdapter> { Ipv6Adapter(false) });
                 Save(form, "main-ipv6-none");
+                // 左侧卡片：放得下的地址不省略
+                TextBox ipv6List = Descendants(form).OfType<TextBox>().Single(t => t.Multiline && t.ReadOnly && t.ScrollBars == ScrollBars.None);
+                Assert.Contains("fe80::a32c:7c34:a627:f521", ipv6List.Text);
             }
 
             // 管理员权限下（README 用）：没有提权提示条，标题栏显示“管理员”
@@ -384,6 +387,15 @@ namespace IP_UpdateTest.Tests
                     foreach (string line in box.Lines) AssertFits(box, line, name, "文字");
                 }
                 AssertTextFits(c, name);
+            }
+        }
+
+        private static IEnumerable<Control> Descendants(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                yield return c;
+                foreach (Control d in Descendants(c)) yield return d;
             }
         }
 

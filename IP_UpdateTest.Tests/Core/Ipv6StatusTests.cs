@@ -129,5 +129,33 @@ namespace IP_UpdateTest.Tests.Core
 
             Assert.Null(Ipv6Status.Describe(null, 4).Notice);
         }
+
+        [Fact]
+        public void WaitForDad_WaitsWhileTentative()
+        {
+            var states = new Queue<DuplicateAddressDetectionState?>(new DuplicateAddressDetectionState?[]
+            {
+                null, DuplicateAddressDetectionState.Tentative, DuplicateAddressDetectionState.Duplicate
+            });
+            int waits = 0;
+
+            Assert.Equal(DuplicateAddressDetectionState.Duplicate, Ipv6Backend.WaitForDad(() => states.Dequeue(), 5, () => waits++));
+            Assert.Equal(2, waits);
+        }
+
+        [Fact]
+        public void WaitForDad_GivesUpWithoutResult()
+        {
+            int reads = 0, waits = 0;
+            DuplicateAddressDetectionState? state = Ipv6Backend.WaitForDad(() =>
+            {
+                reads++;
+                return DuplicateAddressDetectionState.Tentative;
+            }, 3, () => waits++);
+
+            Assert.Null(state);
+            Assert.Equal(3, reads);
+            Assert.Equal(2, waits);
+        }
     }
 }

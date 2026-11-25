@@ -228,6 +228,23 @@ namespace IP_UpdateTest.Tests
                 Open(form);
                 Save(form, "terminal-proxy-ok", 1.5);
             }
+
+            // 手动添加的 SSH 隧道（ssh -D 1081），没有代理软件
+            var ssh = new TerminalProxySnapshot { GeneratedAt = new DateTime(2026, 11, 25, 9, 30, 0) };
+            var manual = new ProxyCandidate { Port = 1081, Socks5 = true, IsManual = true };
+            ssh.Candidates.Add(manual);
+            ssh.Reachable["127.0.0.1:1081"] = true;
+            ssh.Tools.Add(new ToolProxySetting { Tool = ProxyTool.Git, Installed = true });
+            using (var form = new FrmTerminalProxy(new AppSettings { ManualProxy = manual.ManualUrl }, null, ssh))
+            {
+                Open(form);
+                Save(form, "terminal-proxy-manual", 1.5);
+
+                var task = SheetOverlay.Show(form, new ManualProxySheet(manual), null);
+                Save(form, "terminal-proxy-manual-sheet");
+                CloseSheets(form);
+                Assert.True(task.IsCompleted);
+            }
         }
 
         private void RenderInfo()

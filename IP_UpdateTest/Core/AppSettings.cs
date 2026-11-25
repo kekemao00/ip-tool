@@ -63,6 +63,11 @@ namespace IP_UpdateTest.Core
         /// </summary>
         [DataMember] public bool FollowSystemProxy { get; set; }
 
+        /// <summary>
+        /// 终端代理中手动添加的代理（自动检测不到的，如 SSH 隧道），如 socks5://127.0.0.1:1080；没有时为 null
+        /// </summary>
+        [DataMember] public string ManualProxy { get; set; }
+
         public List<DnsPreset> CustomDnsPresets
         {
             get { return customDnsPresets ?? (customDnsPresets = new List<DnsPreset>()); }

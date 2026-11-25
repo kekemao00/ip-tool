@@ -20,16 +20,17 @@ namespace IP_UpdateTest
         private const string ApplyHint = "一键设置写入用户环境变量，新开的终端自动生效；VS Code 等已打开的程序需要重启。";
         private const string ClearHint = "清除只删除指向本机代理的设置，新开的终端恢复直连；已打开的终端粘贴上面的命令即可。";
         private const string ToolClearHint = "清除只改 Git / npm / pip 里指向本机代理的设置，立即生效，不用重开终端。";
-        private const string IdleHint = "启动代理软件后按 F5 或点“重新检测”。";
+        private const string IdleHint = "启动代理软件后按 F5 或点“重新检测”；SSH 隧道等检测不到的代理，可点 + 手动添加。";
         private const string ManualHint = "系统级变量和不指向本机的设置“清除”不会改；已打开的终端粘贴上面的命令可先临时清掉。";
 
         private readonly AppSettings settings;
         private readonly Action<bool> setFollow;
         private readonly TerminalProxyView view = new TerminalProxyView();
         private readonly Card pnlSnippet = new Card();
-        private readonly SelectBox cbxProxy = new SelectBox { Glyph = Glyph.Zap, Placeholder = "没有发现本机代理端口" };
+        private readonly SelectBox cbxProxy = new SelectBox { Glyph = Glyph.Zap, Placeholder = "没有发现代理，可点 + 手动添加" };
+        private readonly SpringButton btnManual = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Plus };
         private readonly Segmented segShell = new Segmented();
-        private readonly CodeBlock code = new CodeBlock { Placeholder = "启动 v2rayN、Clash 等代理软件后，这里会生成设置命令", RightInset = 40 };
+        private readonly CodeBlock code = new CodeBlock { Placeholder = "启动 v2rayN、Clash 等代理软件，或手动添加代理后，这里会生成设置命令", RightInset = 40 };
         private readonly SpringButton btnCopy = new SpringButton { Kind = ButtonKind.Ghost, Glyph = Glyph.Copy };
         private readonly SpringButton btnRescan = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Refresh, Text = "重新检测" };
         private readonly Toggle chkFollow = new Toggle { Text = "跟随系统代理" };
@@ -71,18 +72,21 @@ namespace IP_UpdateTest
             tips.SetToolTip(btnCopy, "复制命令（Ctrl+C）");
             tips.SetToolTip(chkFollow, "代理软件开关系统代理或换端口时，自动设置或清除命令行代理。需要 IP Tool 在托盘运行");
             tips.SetToolTip(cbxProxy, "一键设置使用的代理地址");
+            tips.SetToolTip(btnManual, "手动添加检测不到的代理，如 SSH 隧道、局域网里的代理服务器");
+            btnManual.Visible = settings != null;
 
             // 复制按钮放在代码块里：透明背景只会透出父控件，放在卡片上会露出一块白底
             code.Controls.Add(btnCopy);
-            pnlSnippet.Controls.AddRange(new Control[] { cbxProxy, segShell, code });
+            pnlSnippet.Controls.AddRange(new Control[] { cbxProxy, btnManual, segShell, code });
             Controls.AddRange(new Control[] { view, pnlSnippet, btnRescan, chkFollow, btnClear, btnApply });
             int tab = 0;
-            foreach (Control c in new Control[] { view, pnlSnippet, cbxProxy, segShell, code, btnRescan, chkFollow, btnClear, btnApply })
+            foreach (Control c in new Control[] { view, pnlSnippet, cbxProxy, btnManual, segShell, code, btnRescan, chkFollow, btnClear, btnApply })
                 c.TabIndex = tab++;
 
             cbxProxy.SelectedIndexChanged += async (s, e) => await ProxySelectedAsync();
             segShell.SelectedIndexChanged += (s, e) => UpdateSnippet();
             btnCopy.Click += (s, e) => CopySnippet();
+            btnManual.Click += async (s, e) => await EditManualProxyAsync();
             btnRescan.Click += async (s, e) => await ScanAsync(true);
             btnApply.Click += async (s, e) => await ApplyAsync(false);
             btnClear.Click += async (s, e) => await ApplyAsync(true);
@@ -111,6 +115,7 @@ namespace IP_UpdateTest
         private static string Describe(ProxyCandidate c)
         {
             var parts = new List<string>();
+            if (c.IsManual) parts.Add("手动添加");
             if (c.Owner != null) parts.Add(c.Owner);
             parts.Add(c.Protocol);
             if (c.IsSystemProxy) parts.Add("系统代理");
@@ -138,7 +143,14 @@ namespace IP_UpdateTest
             pnlSnippet.SetBounds(gutter, footerY - P(16) - snippetH, width, snippetH);
             int segW = Math.Min(P(330), inner / 2);
             segShell.SetBounds(pnlSnippet.Width - pad - segW, pad, segW, P(36));
-            cbxProxy.Place(new Rectangle(pad, pad - P(2), segShell.Left - P(12) - pad, P(40)));
+            int proxyRight = segShell.Left - P(12);
+            // 不用 Visible 判断：窗口显示前它总是 false
+            if (settings != null)
+            {
+                btnManual.SetBounds(proxyRight - P(36), pad, P(36), P(36));
+                proxyRight = btnManual.Left - P(8);
+            }
+            cbxProxy.Place(new Rectangle(pad, pad - P(2), proxyRight - pad, P(40)));
             code.SetBounds(pad, pad + P(36) + P(12), inner, codeH);
             int copy = P(32);
             btnCopy.SetBounds(code.Width - P(6) - copy, P(6), copy, copy);
@@ -222,9 +234,9 @@ namespace IP_UpdateTest
         #region 检测
 
         /// <summary>
-        /// full 为 false 时是设置之后的复查：不显示加载画面，结果原地刷新
+        /// full 为 false 时是设置之后的复查：不显示加载画面，结果原地刷新。select 为检测后要选中的代理（host:port）
         /// </summary>
-        private async Task ScanAsync(bool full)
+        private async Task ScanAsync(bool full, string select = null)
         {
             if (running) return;
             running = true;
@@ -238,10 +250,10 @@ namespace IP_UpdateTest
             try
             {
                 // 用户选的不是默认代理时也一并实测，不然重新检测后它的结果就丢了
-                TerminalProxySnapshot result = await TerminalProxyScanner.ScanAsync((cbxProxy.SelectedItem as ProxyCandidate)?.Endpoint);
+                TerminalProxySnapshot result = await TerminalProxyScanner.ScanAsync(select ?? (cbxProxy.SelectedItem as ProxyCandidate)?.Endpoint, ManualProxy);
                 if (IsDisposed) return;
                 snapshot = result;
-                BindCandidates();
+                BindCandidates(select);
                 Analyze(full);
                 if (full) btnRescan.Reset();
             }
@@ -281,11 +293,11 @@ namespace IP_UpdateTest
             await ScanAsync(false);
         }
 
-        private void BindCandidates()
+        private void BindCandidates(string select = null)
         {
-            ProxyCandidate previous = cbxProxy.SelectedItem as ProxyCandidate;
-            ProxyCandidate pick = (previous == null ? null : snapshot.Candidates.FirstOrDefault(c => c.Endpoint == previous.Endpoint))
-                ?? TerminalProxyAnalyzer.PickTarget(snapshot);
+            string endpoint = select ?? (cbxProxy.SelectedItem as ProxyCandidate)?.Endpoint;
+            ProxyCandidate pick = (endpoint == null ? null : snapshot.Candidates.FirstOrDefault(c => TerminalProxyAnalyzer.SameEndpoint(c.Endpoint, endpoint)))
+                ?? TerminalProxyAnalyzer.PickInitial(snapshot);
             binding = true;
             cbxProxy.SetItems(snapshot.Candidates.Cast<object>(), pick == null ? -1 : snapshot.Candidates.IndexOf(pick));
             binding = false;
@@ -310,6 +322,44 @@ namespace IP_UpdateTest
             if (!IsDisposed && cbxProxy.SelectedItem == target) Analyze(false);
         }
 
+        /// <summary>
+        /// 设置里保存的手动添加的代理，没有时为 null
+        /// </summary>
+        private ProxyCandidate ManualProxy
+        {
+            get
+            {
+                ProxyCandidate manual;
+                return settings != null && ProxyCandidate.TryParseManual(settings.ManualProxy, out manual) ? manual : null;
+            }
+        }
+
+        /// <summary>
+        /// 添加、修改或删除手动添加的代理，保存后重新检测并选中它
+        /// </summary>
+        private async Task EditManualProxyAsync()
+        {
+            if (running || settings == null) return;
+            object result = await SheetOverlay.Show(this, new ManualProxySheet(ManualProxy), btnManual);
+            if (result == null || IsDisposed) return;
+
+            var added = result as ProxyCandidate;
+            string previous = settings.ManualProxy;
+            settings.ManualProxy = added?.ManualUrl;
+            try
+            {
+                settings.Save();
+            }
+            catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException)
+            {
+                settings.ManualProxy = previous;
+                Notify(NoticeKind.Error, "保存失败：" + ex.Message);
+                return;
+            }
+            Notify(NoticeKind.Success, added != null ? $"已添加 {added.Url}，正在检测" : "已删除手动添加的代理");
+            await ScanAsync(true, added?.Endpoint);
+        }
+
         #endregion
 
         #region 设置
@@ -329,6 +379,7 @@ namespace IP_UpdateTest
             btnClear.Enabled = ready && clearCount > 0;
             btnClear.Kind = btnApply.Visible ? ButtonKind.Secondary : ButtonKind.Primary;
             btnRescan.Enabled = !running;
+            btnManual.Enabled = !running;
             cbxProxy.Enabled = !running && snapshot != null && snapshot.Candidates.Count > 1;
             InkToolTip.Shared.SetToolTip(btnApply, applyCount > 0 ? "将修改：\n" + string.Join("\n", report.ApplyChanges.Select(c => c.ToString()))
                 : manual ? "剩下的问题需要手动处理，见上方说明" : "各处已指向当前代理");

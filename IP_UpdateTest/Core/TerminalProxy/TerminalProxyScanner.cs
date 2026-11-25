@@ -103,7 +103,8 @@ namespace IP_UpdateTest.Core.TerminalProxy
         }
 
         /// <param name="selected">用户在窗口里选的代理（host:port），和默认的代理一起实测</param>
-        public static async Task<TerminalProxySnapshot> ScanAsync(string selected = null)
+        /// <param name="manual">用户手动添加的代理，没有时为 null</param>
+        public static async Task<TerminalProxySnapshot> ScanAsync(string selected = null, ProxyCandidate manual = null)
         {
             var f = new TerminalProxySnapshot { GeneratedAt = DateTime.Now };
             Dictionary<int, string> owners = null;
@@ -120,6 +121,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
 
             Task tools = Task.Run(() => ReadTools(f));
             await FindCandidatesAsync(f, owners, listeners);
+            await AddManualAsync(f, manual);
 
             // 其余设置里出现的地址只测能否连接。用户级和系统级的都测：清除用户级之后系统级的会生效
             await tools;
@@ -131,7 +133,7 @@ namespace IP_UpdateTest.Core.TerminalProxy
             bool[] reachable = await Task.WhenAll(pending.Select(Connect));
             for (int i = 0; i < pending.Count; i++) f.Reachable[pending[i]] = reachable[i];
 
-            ProxyCandidate target = TerminalProxyAnalyzer.PickTarget(f);
+            ProxyCandidate target = TerminalProxyAnalyzer.PickInitial(f);
             ProxyCandidate chosen = f.Candidates.FirstOrDefault(c => TerminalProxyAnalyzer.SameEndpoint(c.Endpoint, selected));
             await Task.WhenAll(new[] { target, chosen }.Where(c => c != null).Distinct().Select(c => TestTunnelAsync(f, c)));
             return f;
@@ -291,6 +293,34 @@ namespace IP_UpdateTest.Core.TerminalProxy
             }));
             // 系统代理的端口最前，其次是能用 HTTP 的、认识的代理软件的
             f.Candidates.AddRange(found.OrderByDescending(c => c.IsSystemProxy).ThenByDescending(c => c.Http).ThenByDescending(c => c.Owner != null).ThenBy(c => c.Port));
+        }
+
+        /// <summary>
+        /// 手动添加的代理：连不上也列出（如 SSH 隧道还没建立），由分析结果提示；
+        /// 与检测到的端口相同时取代它，协议以用户选的为准
+        /// </summary>
+        private static async Task AddManualAsync(TerminalProxySnapshot f, ProxyCandidate manual)
+        {
+            if (manual == null) return;
+            ProxyCandidate detected = f.Candidates.FirstOrDefault(c => TerminalProxyAnalyzer.SameEndpoint(c.Endpoint, manual.Endpoint));
+            var candidate = new ProxyCandidate
+            {
+                Host = manual.Host,
+                Port = manual.Port,
+                Http = manual.Http,
+                Socks5 = manual.Socks5,
+                IsManual = true,
+                Owner = detected?.Owner,
+                IsSystemProxy = detected != null && detected.IsSystemProxy
+            };
+            if (detected != null)
+            {
+                f.Candidates[f.Candidates.IndexOf(detected)] = candidate;
+                return;
+            }
+            // 局域网或远程的代理要先解析域名，多等一会
+            f.Reachable[candidate.Endpoint] = await ProxyPortProbe.CanConnectAsync(candidate.Host, candidate.Port, 2000);
+            f.Candidates.Add(candidate);
         }
 
         private static void ReadSystemProxy(TerminalProxySnapshot f)

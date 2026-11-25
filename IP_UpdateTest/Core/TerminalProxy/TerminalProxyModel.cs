@@ -25,6 +25,11 @@ namespace IP_UpdateTest.Core.TerminalProxy
         /// </summary>
         public bool IsSystemProxy { get; set; }
 
+        /// <summary>
+        /// 用户手动添加的（如 SSH 隧道、公司代理），检测不到时也列出，协议以用户选的为准
+        /// </summary>
+        public bool IsManual { get; set; }
+
         public string Endpoint
         {
             get { return EndpointOf(Host, Port); }
@@ -49,6 +54,44 @@ namespace IP_UpdateTest.Core.TerminalProxy
         public string Protocol
         {
             get { return Http && Socks5 ? "HTTP + SOCKS5" : Http ? "HTTP" : Socks5 ? "SOCKS5" : "未知协议"; }
+        }
+
+        /// <summary>
+        /// 手动添加的代理保存在设置里的写法，如 http://127.0.0.1:8080、socks5://127.0.0.1:1080
+        /// </summary>
+        public string ManualUrl
+        {
+            get { return (Http || !Socks5 ? "http://" : "socks5://") + Endpoint; }
+        }
+
+        /// <summary>
+        /// 解析手动添加的代理（ManualUrl 的写法；socks5h://、socks://、不带协议的 host:port 也认，不带协议时按 HTTP）
+        /// </summary>
+        public static bool TryParseManual(string url, out ProxyCandidate candidate)
+        {
+            candidate = null;
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            string text = url.Trim();
+            if (!text.Contains("://")) text = "http://" + text;
+            Uri uri;
+            if (!Uri.TryCreate(text, UriKind.Absolute, out uri) || uri.Port <= 0 || uri.Port > 65535) return false;
+            bool socks = uri.Scheme.StartsWith("socks", StringComparison.OrdinalIgnoreCase);
+            if (!socks && !string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase)) return false;
+            string host = uri.Host.Trim('[', ']');
+            if (!IsValidHost(host)) return false;
+            candidate = new ProxyCandidate { Host = host, Port = uri.Port, Http = !socks, Socks5 = socks, IsManual = true };
+            return true;
+        }
+
+        /// <summary>
+        /// 能当代理地址的主机：IPv4、IPv6 地址或域名
+        /// </summary>
+        public static bool IsValidHost(string host)
+        {
+            if (string.IsNullOrWhiteSpace(host)) return false;
+            System.Net.IPAddress address;
+            return IpValidator.TryParseIPv4(host, out address) || Ipv6Validator.TryParse(host, out address)
+                || Uri.CheckHostName(host) == UriHostNameType.Dns;
         }
 
         public override string ToString()

@@ -39,22 +39,38 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 ?? f.Candidates.FirstOrDefault(c => c.Socks5);
         }
 
+        /// <summary>
+        /// 打开窗口时默认选的代理：环境变量已经指向手动添加的代理时选它（之前用它一键设置过），否则同 PickTarget
+        /// </summary>
+        public static ProxyCandidate PickInitial(TerminalProxySnapshot f)
+        {
+            string env = f.EffectiveEnvironment(HttpsProxy) ?? f.EffectiveEnvironment(HttpProxy) ?? f.EffectiveEnvironment(AllProxy);
+            string endpoint = ProxySettings.UrlEndpoint(env);
+            return f.Candidates.FirstOrDefault(c => c.IsManual && SameEndpoint(c.Endpoint, endpoint)) ?? PickTarget(f);
+        }
+
         public static TerminalProxyReport Analyze(TerminalProxySnapshot f, ProxyCandidate target, TerminalProxyBackup backup)
         {
             var report = new TerminalProxyReport { GeneratedAt = f.GeneratedAt, Target = target };
-            string owner = target?.Owner ?? f.Clients.FirstOrDefault();
+            bool manualTarget = target != null && target.IsManual;
+            string owner = manualTarget ? null : target?.Owner ?? f.Clients.FirstOrDefault();
 
             // 代理本身
             TerminalProxyRow proxyRow = null;
             if (target != null)
             {
-                string name = (target.Owner ?? "本机代理") + " · " + target.Protocol;
+                string name = (manualTarget ? "手动添加" : target.Owner ?? "本机代理") + " · " + target.Protocol;
                 long? ms;
                 bool tested = f.Tunnels.TryGetValue(target.Endpoint, out ms);
-                if (tested && ms.HasValue)
+                if (manualTarget && f.IsReachable(target.Endpoint) == false)
+                    proxyRow = new TerminalProxyRow("proxy", name, CheckStatus.Fail, "连不上",
+                        $"{target.Endpoint} 没有响应：请先建立 SSH 隧道或启动代理程序，再按 F5 重新检测");
+                else if (tested && ms.HasValue)
                     proxyRow = new TerminalProxyRow("proxy", name, CheckStatus.Ok, "可用", $"{target.Endpoint}，经代理访问外网 {ms} ms");
                 else if (tested)
                     proxyRow = new TerminalProxyRow("proxy", name, CheckStatus.Warning, "访问失败", $"{target.Endpoint} 能连上，但经代理访问外网失败：节点可能不可用，可在代理软件中切换节点");
+                else if (manualTarget)
+                    proxyRow = new TerminalProxyRow("proxy", name, CheckStatus.Info, "已添加", target.Endpoint + "，端口可以连接");
                 else
                     proxyRow = new TerminalProxyRow("proxy", name, CheckStatus.Info, "已发现", target.Endpoint);
                 report.Rows.Add(proxyRow);
@@ -104,9 +120,9 @@ namespace IP_UpdateTest.Core.TerminalProxy
             Summarize(f, report, envRow, proxyRow, systemRow, owner, systemDead);
 
             // 链路
-            report.Steps.Add(new TerminalProxyStep(owner ?? "代理软件", owner != null || target != null ? CheckStatus.Ok : CheckStatus.Skipped));
+            report.Steps.Add(new TerminalProxyStep(manualTarget ? "手动添加" : owner ?? "代理软件", owner != null || target != null ? CheckStatus.Ok : CheckStatus.Skipped));
             report.Steps.Add(new TerminalProxyStep(target != null ? "端口 " + target.Port : "本机端口",
-                target == null ? CheckStatus.Skipped : proxyRow.Status == CheckStatus.Warning ? CheckStatus.Warning : CheckStatus.Ok));
+                target == null ? CheckStatus.Skipped : IsBad(proxyRow.Status) ? proxyRow.Status : CheckStatus.Ok));
             report.Steps.Add(new TerminalProxyStep("系统代理", systemDead ? CheckStatus.Fail
                 : f.SystemProxyEnabled ? CheckStatus.Ok : !string.IsNullOrWhiteSpace(f.PacUrl) ? CheckStatus.Info : CheckStatus.Skipped));
             CheckStatus terminal = TerminalRows(report).Select(r => r.Status).DefaultIfEmpty(CheckStatus.Ok).OrderBy(Severity).Last();
@@ -370,6 +386,15 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 return;
             }
 
+            // 手动添加的代理连不上：先解决它，一键设置的话命令行会连不上网
+            if (proxyRow != null && proxyRow.Status == CheckStatus.Fail)
+            {
+                report.Overall = CheckStatus.Fail;
+                report.Title = "手动添加的代理连不上";
+                report.Detail = proxyRow.Detail + "。现在一键设置的话，git、curl 等会连不上网";
+                return;
+            }
+
             List<TerminalProxyRow> manual = badRows.Where(r => !WillFix(r, report.ApplyChanges)).ToList();
             if (envRow.Status == CheckStatus.Warning && envRow.Badge == "未设置" && manual.Count == 0)
             {
@@ -378,8 +403,9 @@ namespace IP_UpdateTest.Core.TerminalProxy
                 bool pipBreaks = !target.Http && f.Tools.Any(t => t.Tool == ProxyTool.Pip && t.Installed && t.Values.Count == 0);
                 report.Overall = anyFail ? CheckStatus.Fail : CheckStatus.Warning;
                 report.Title = "命令行还没有走代理";
-                report.Detail = (owner ?? "代理软件") + (f.SystemProxyEnabled && !systemDead ? " 只设置了系统代理：浏览器能用，但" : " 没有设置命令行代理：")
-                    + "git、curl、npm 等命令行工具只认环境变量。一键设置后，新开的终端即可走代理"
+                report.Detail = (target.IsManual ? "" : (owner ?? "代理软件") + (f.SystemProxyEnabled && !systemDead ? " 只设置了系统代理：浏览器能用，但" : " 没有设置命令行代理："))
+                    + "git、curl、npm 等命令行工具只认环境变量。一键设置后，新开的终端即可"
+                    + (target.IsManual ? $"经 {target.Endpoint} 走代理" : "走代理")
                     + (others.Length > 0 ? $"，{others} 自己的代理设置也会一并改正" : "")
                     + (pipBreaks ? "。注意：只有 SOCKS 端口，设置后 pip 用不了，需在 pip.ini 中单独设置 HTTP 代理" : "");
             }

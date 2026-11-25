@@ -89,6 +89,10 @@ namespace IP_UpdateTest.Tests
                 Save(form, "main-confirm");
                 CloseSheets(form);
                 Assert.True(confirm.IsCompleted);
+
+                // IPv6 页：第一个网卡手动设置了 IPv6
+                form.ShowIpv6Page();
+                Save(form, "main-ipv6");
             }
 
             // 管理员权限下（README 用）：没有提权提示条，标题栏显示“管理员”
@@ -254,7 +258,13 @@ namespace IP_UpdateTest.Tests
                     ConfiguredSubnetMask = "255.255.255.0",
                     ConfiguredGateway = "192.168.1.1",
                     ConfiguredDns = new[] { "223.5.5.5", "119.29.29.29" },
-                    MacAddress = PhysicalAddress.Parse("00-15-5D-01-02-03")
+                    MacAddress = PhysicalAddress.Parse("00-15-5D-01-02-03"),
+                    InterfaceIndex = 12,
+                    Ipv6Enabled = true,
+                    Ipv6ConfigKnown = true,
+                    Ipv6ManualAddresses = new List<Ipv6ManualAddress> { new Ipv6ManualAddress("2001:db8:1::20", 64) },
+                    Ipv6ManualGateways = new List<string> { "fe80::1" },
+                    ConfiguredIpv6Dns = new[] { "2400:3200::1", "2400:3200:baba::1" }
                 },
                 new NetworkAdapter
                 {

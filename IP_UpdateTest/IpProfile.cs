@@ -120,6 +120,18 @@ namespace IP_UpdateTest
         };
 
         /// <summary>
+        /// 预设 DNS 的 IPv6 地址（114 DNS 没有公共 IPv6 地址）
+        /// </summary>
+        public static readonly Dictionary<string, string[]> PresetIpv6Dns = new Dictionary<string, string[]>
+        {
+            { "阿里 DNS", new[] { "2400:3200::1", "2400:3200:baba::1" } },
+            { "腾讯 DNS", new[] { "2402:4e00::" } },
+            { "百度 DNS", new[] { "2400:da00::6666" } },
+            { "Google DNS", new[] { "2001:4860:4860::8888", "2001:4860:4860::8844" } },
+            { "Cloudflare", new[] { "2606:4700:4700::1111", "2606:4700:4700::1001" } }
+        };
+
+        /// <summary>
         /// 读取时遇到的问题，界面应提示一次；没有问题时为 null
         /// </summary>
         public static string LoadWarning { get; private set; }

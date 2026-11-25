@@ -23,6 +23,7 @@ Windows 网络配置与诊断工具：一键切换网卡 IP / DNS 方案，分�
 ### 网卡配置
 - 查看网卡信息：IPv4、子网掩码、网关、DNS（区分自动 / 手动）、MAC、DHCP 服务器与租约、IPv6
 - 静态 IP 与自动获取（DHCP）切换，支持 **DHCP + 手动 DNS**
+- IPv6：配置卡片顶部切到“IPv6”，可手动设置地址、前缀长度、默认网关和 DNS（可直接输入 `2001:db8::10/64`，DNS 有常用公共 DNS 的 IPv6 预设）。与系统“Internet 协议版本 6 属性”一样，手动地址加在路由器分配的地址之外；改回自动获取会删除手动设置的地址和网关。只改了其中一个协议时，应用时不会重设另一个
 - 输入即时校验：IP 格式、掩码是否连续、网关是否在同一网段、是否为网段或广播地址；可直接输入 `192.168.1.10/24`
 - 应用前检测 IP 冲突（同网段 ARP 探测）；修改当前上网的网卡前再次确认
 - 单个网卡启用 / 禁用；“更多”菜单中可启用或禁用列表中的所有网卡、续订 DHCP 租约
@@ -77,7 +78,7 @@ v2rayN、Clash 等代理软件只设置系统代理，浏览器能用，但在 c
 - 未连接的网卡（未插网线、Wi-Fi 未连接）只能改为自动获取或修改 DNS：Windows 无法关闭未连接网卡的 DHCP，设置的静态 IP 不能可靠生效。请先插好网线或连接 Wi-Fi（对端没有 DHCP 服务也可以），再设置静态 IP
 - Hyper-V 等由系统管理的虚拟网卡只能查看
 - 按 Ctrl+K 打开命令面板，输入关键字（如“诊断”“DNS”或方案名）即可执行对应操作
-- 配置方案和设置保存在 `%APPDATA%\IPTool\`
+- 配置方案和设置保存在 `%APPDATA%\IPTool\`；配置方案和命令行目前只包含 IPv4 设置
 
 ## 命令行
 
@@ -129,6 +130,7 @@ dotnet test IP_UpdateTest.sln
 - C# / .NET Framework 4.8 / Windows Forms（SDK 风格项目）
 - 网卡信息：`System.Net.NetworkInformation`、WMI `MSFT_NetAdapter`
 - 修改配置：WMI `Win32_NetworkAdapterConfiguration`；未连接网卡和清除网关使用 `netsh`
+- IPv6：手动设置的地址和网关从 WMI `MSFT_NetIPAddress` / `MSFT_NetRoute` 读取，用 `netsh interface ipv6` 修改
 
 ## License
 

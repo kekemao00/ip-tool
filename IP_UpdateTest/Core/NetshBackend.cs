@@ -98,14 +98,17 @@ namespace IP_UpdateTest.Core
             return Run(new[] { BuildClearGatewayCommand(interfaceIndex, ipAddress, subnetMask) });
         }
 
-        private static ApplyResult Run(IEnumerable<string> commands)
+        /// <summary>
+        /// 依次执行，遇到失败即停止；ignoreFailure 返回 true 的命令失败时继续
+        /// </summary>
+        internal static ApplyResult Run(IEnumerable<string> commands, Func<string, bool> ignoreFailure = null)
         {
             foreach (string arguments in commands)
             {
                 int exitCode;
                 string output;
                 Execute(arguments, out exitCode, out output);
-                if (exitCode != 0)
+                if (exitCode != 0 && (ignoreFailure == null || !ignoreFailure(arguments)))
                 {
                     string reason = string.IsNullOrWhiteSpace(output) ? $"退出码 {exitCode}" : output.Trim();
                     return ApplyResult.Fail($"netsh 执行失败：{reason}\n命令：netsh {arguments}");

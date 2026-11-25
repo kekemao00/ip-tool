@@ -160,6 +160,104 @@ namespace IP_UpdateTest
 
         #endregion
 
+        #region IPv6 配置
+
+        /// <summary>
+        /// 网卡启用了 IPv6（网卡属性中勾选了“Internet 协议版本 6”）
+        /// </summary>
+        public bool Ipv6Enabled { get; set; }
+
+        /// <summary>
+        /// 读到了手动设置的 IPv6 地址和网关（MSFT_NetIPAddress 等需要 Windows 8 及以上）；读不到时不能修改 IPv6
+        /// </summary>
+        public bool Ipv6ConfigKnown { get; set; }
+
+        /// <summary>
+        /// 手动设置的 IPv6 地址（不含路由器通告、DHCPv6 得到的）
+        /// </summary>
+        public List<Ipv6ManualAddress> Ipv6ManualAddresses { get; set; } = new List<Ipv6ManualAddress>();
+
+        /// <summary>
+        /// 手动设置的 IPv6 默认网关
+        /// </summary>
+        public List<string> Ipv6ManualGateways { get; set; } = new List<string>();
+
+        /// <summary>
+        /// 手动设置的 IPv6 DNS；为空表示自动获取
+        /// </summary>
+        public string[] ConfiguredIpv6Dns { get; set; } = new string[0];
+
+        public bool HasManualIpv6
+        {
+            get { return Ipv6ManualAddresses != null && Ipv6ManualAddresses.Count > 0; }
+        }
+
+        public bool HasStaticIpv6Dns
+        {
+            get { return ConfiguredIpv6Dns != null && ConfiguredIpv6Dns.Length > 0; }
+        }
+
+        /// <summary>
+        /// IPv6 地址：手动设置时取手动地址，否则取系统自动配置的地址
+        /// </summary>
+        public string Ipv6Address
+        {
+            get
+            {
+                if (HasManualIpv6) return Ipv6ManualAddresses[0].Address;
+                UnicastIPAddressInformation live = GetIPv6Address();
+                return live == null ? "" : ScopeFree(live.Address);
+            }
+        }
+
+        /// <summary>
+        /// 前缀长度（文本），未知时为空
+        /// </summary>
+        public string Ipv6PrefixLength
+        {
+            get
+            {
+                if (HasManualIpv6) return Ipv6ManualAddresses[0].PrefixLength.ToString();
+                UnicastIPAddressInformation live = GetIPv6Address();
+                return live == null ? "" : live.PrefixLength.ToString();
+            }
+        }
+
+        /// <summary>
+        /// IPv6 默认网关：手动设置的优先，否则取系统报告的（通常来自路由器通告）
+        /// </summary>
+        public string Ipv6Gateway
+        {
+            get
+            {
+                if (Ipv6ManualGateways != null && Ipv6ManualGateways.Count > 0) return Ipv6ManualGateways[0];
+                if (HasManualIpv6 || !UseLiveAddresses || Gateways == null) return "";
+                GatewayIPAddressInformation gateway = Gateways.FirstOrDefault(g => g.Address.AddressFamily == AddressFamily.InterNetworkV6
+                    && !g.Address.Equals(IPAddress.IPv6Any));
+                return gateway == null ? "" : ScopeFree(gateway.Address);
+            }
+        }
+
+        public string Ipv6DnsMain
+        {
+            get
+            {
+                List<string> dns = GetIpv6DnsServers();
+                return dns.Count > 0 ? dns[0] : "";
+            }
+        }
+
+        public string Ipv6DnsBackup
+        {
+            get
+            {
+                List<string> dns = GetIpv6DnsServers();
+                return dns.Count > 1 ? dns[1] : "";
+            }
+        }
+
+        #endregion
+
         #region 显示用属性
 
         /// <summary>
@@ -365,6 +463,42 @@ namespace IP_UpdateTest
                 ? Ipv4Selector.IPv4Only(DnsAddresses).Select(d => d.ToString()).ToList()
                 : new List<string>();
             return live.Count > 0 ? live : (ConfiguredDns ?? new string[0]).ToList();
+        }
+
+        /// <summary>
+        /// 自动配置的 IPv6 地址：全局或唯一本地地址，优先固定地址（临时地址每天变）
+        /// </summary>
+        private UnicastIPAddressInformation GetIPv6Address()
+        {
+            if (!UseLiveAddresses || IPAddresses == null) return null;
+            return IPAddresses
+                .Where(a => a.Address.AddressFamily == AddressFamily.InterNetworkV6 && !a.Address.IsIPv6LinkLocal
+                    && !IPAddress.IsLoopback(a.Address) && !a.Address.IsIPv6Teredo)
+                .OrderBy(a => a.SuffixOrigin == SuffixOrigin.Random ? 1 : 0)
+                .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// IPv6 DNS：手动设置的优先，否则取系统报告的。
+        /// 没有任何 IPv6 DNS 时 Windows 报告 fec0:0:0:ffff::1 等已废弃的默认地址，不显示
+        /// </summary>
+        private List<string> GetIpv6DnsServers()
+        {
+            if (HasStaticIpv6Dns) return ConfiguredIpv6Dns.ToList();
+            if (!UseLiveAddresses || DnsAddresses == null) return new List<string>();
+            return DnsAddresses
+                .Where(d => d.AddressFamily == AddressFamily.InterNetworkV6 && !d.IsIPv6SiteLocal)
+                .Select(ScopeFree)
+                .Distinct()
+                .ToList();
+        }
+
+        /// <summary>
+        /// 去掉作用域后缀，如 fe80::1%12 → fe80::1
+        /// </summary>
+        private static string ScopeFree(IPAddress address)
+        {
+            return new IPAddress(address.GetAddressBytes()).ToString();
         }
     }
 }

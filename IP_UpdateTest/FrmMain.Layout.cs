@@ -10,7 +10,7 @@ namespace IP_UpdateTest
     public partial class FrmMain
     {
         private const float WindowWidth = 780;
-        private const float CardHeight = 384;
+        private const float CardHeight = 432;
         private const float LeftWidth = 300;
         private const float LabelColumn = 76;
 
@@ -39,6 +39,8 @@ namespace IP_UpdateTest
 
         // 配置卡片
         private readonly Card pnlConfig = new Card();
+        private readonly InkLabel lblFamily = RowLabel("协议");
+        private readonly Segmented segFamily = new Segmented();
         private readonly InkLabel lblIpMode = RowLabel("IP 获取");
         private readonly Segmented segIpMode = new Segmented();
         private readonly InkLabel lblIpAddress = RowLabel("IP 地址");
@@ -56,6 +58,15 @@ namespace IP_UpdateTest
         private readonly FieldBox txtDnsMain = new FieldBox { Glyph = Glyph.Server, Mono = true };
         private readonly InkLabel lblDnsBackup = RowLabel("备用 DNS");
         private readonly FieldBox txtDnsBackup = new FieldBox { Glyph = Glyph.Server, Mono = true };
+
+        // 配置卡片的 IPv6 页，与 IPv4 页的控件位置相同，切换时只换显示
+        private readonly Segmented seg6Mode = new Segmented();
+        private readonly FieldBox txt6Address = new FieldBox { Glyph = Glyph.Monitor, Mono = true };
+        private readonly FieldBox txt6Prefix = new FieldBox { Glyph = Glyph.Hash, Mono = true };
+        private readonly FieldBox txt6Gateway = new FieldBox { Glyph = Glyph.Router, Mono = true };
+        private readonly Segmented seg6DnsMode = new Segmented();
+        private readonly FieldBox txt6DnsMain = new FieldBox { Glyph = Glyph.Server, Mono = true };
+        private readonly FieldBox txt6DnsBackup = new FieldBox { Glyph = Glyph.Server, Mono = true };
 
         // 操作栏
         private readonly SpringButton btnProfile = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Layers, Text = "配置方案", ShowChevron = true };
@@ -93,8 +104,11 @@ namespace IP_UpdateTest
         private void BuildControls()
         {
             SuspendLayout();
+            segFamily.SetItems("IPv4", "IPv6");
             segIpMode.SetItems("自动获取 (DHCP)", "手动设置");
             segDnsMode.SetItems("自动获取", "手动设置");
+            seg6Mode.SetItems("自动获取", "手动设置");
+            seg6DnsMode.SetItems("自动获取", "手动设置");
 
             pnlElevation.Controls.AddRange(new Control[] { lblElevation, btnRestartAsAdmin });
             pnlAdapter.Controls.AddRange(new Control[]
@@ -104,8 +118,9 @@ namespace IP_UpdateTest
             });
             pnlConfig.Controls.AddRange(new Control[]
             {
-                lblIpMode, segIpMode, lblIpAddress, txtIpAddress, lblMask, txtMask, lblGateway, txtGateway, ruleConfig,
-                lblDnsMode, segDnsMode, btnDnsPreset, btnDnsBenchmark, lblDnsMain, txtDnsMain, lblDnsBackup, txtDnsBackup
+                lblFamily, segFamily, lblIpMode, segIpMode, lblIpAddress, txtIpAddress, lblMask, txtMask, lblGateway, txtGateway, ruleConfig,
+                lblDnsMode, segDnsMode, btnDnsPreset, btnDnsBenchmark, lblDnsMain, txtDnsMain, lblDnsBackup, txtDnsBackup,
+                seg6Mode, txt6Address, txt6Prefix, txt6Gateway, seg6DnsMode, txt6DnsMain, txt6DnsBackup
             });
             Controls.AddRange(new Control[] { pnlElevation, pnlAdapter, pnlConfig, btnProfile, btnDiagnose, btnReport, btnTerminalProxy, btnRevert, btnApply, lblStatus });
 
@@ -113,7 +128,12 @@ namespace IP_UpdateTest
             int tab = 0;
             foreach (Control c in new Control[] { btnRestartAsAdmin, cbxNetworkAdapter, btnRefresh, chkShowAll, btnToggleAdapter, btnMore })
                 c.TabIndex = tab++;
-            foreach (Control c in new Control[] { segIpMode, txtIpAddress, txtMask, txtGateway, segDnsMode, btnDnsPreset, btnDnsBenchmark, txtDnsMain, txtDnsBackup })
+            // 隐藏的那一页的控件不参与 Tab
+            foreach (Control c in new Control[]
+            {
+                segFamily, segIpMode, txtIpAddress, txtMask, txtGateway, segDnsMode, btnDnsPreset, btnDnsBenchmark, txtDnsMain, txtDnsBackup,
+                seg6Mode, txt6Address, txt6Prefix, txt6Gateway, seg6DnsMode, txt6DnsMain, txt6DnsBackup
+            })
                 c.TabIndex = tab++;
             pnlElevation.TabIndex = 0;
             pnlAdapter.TabIndex = 1;
@@ -195,16 +215,21 @@ namespace IP_UpdateTest
             ruleAdapter.Bounds = R(pad, 148, inner, 1);
 
             float y = 160;
-            foreach (var pair in new[] { new { Caption = lblMacCaption, Box = txtMac, Lines = 1 }, new { Caption = lblDhcpCaption, Box = txtDhcpServer, Lines = 1 }, new { Caption = lblIPv6Caption, Box = txtIPv6, Lines = 3 } })
+            foreach (var pair in new[] { new { Caption = lblMacCaption, Box = txtMac }, new { Caption = lblDhcpCaption, Box = txtDhcpServer } })
             {
                 pair.Caption.Bounds = R(pad, y, inner, 16);
-                pair.Box.Bounds = R(pad, y + 18, inner, pair.Lines == 1 ? 20 : 54);
-                y += 18 + (pair.Lines == 1 ? 20 : 54) + 8;
+                pair.Box.Bounds = R(pad, y + 18, inner, 20);
+                y += 18 + 20 + 8;
             }
 
+            float buttonsY = CardHeight - pad - 36;
+            lblIPv6Caption.Bounds = R(pad, y, inner, 16);
+            // IPv6 地址可能有好几个，占满到按钮上方
+            txtIPv6.Bounds = R(pad, y + 18, inner, buttonsY - 12 - (y + 18));
+
             float bw = (inner - 8) / 2;
-            btnToggleAdapter.Bounds = R(pad, CardHeight - pad - 36, bw, 36);
-            btnMore.Bounds = R(pad + bw + 8, CardHeight - pad - 36, bw, 36);
+            btnToggleAdapter.Bounds = R(pad, buttonsY, bw, 36);
+            btnMore.Bounds = R(pad + bw + 8, buttonsY, bw, 36);
         }
 
         private void LayoutConfigCard(float cardWidth)
@@ -214,13 +239,24 @@ namespace IP_UpdateTest
             float controlWidth = cardWidth - pad - controlX;
             float y = pad;
 
+            PlaceRow(lblFamily, y);
+            segFamily.Bounds = R(controlX, y, 160, 40);
+            y += 48;
+
             PlaceRow(lblIpMode, y);
             segIpMode.Bounds = R(controlX, y, controlWidth, 40);
+            seg6Mode.Bounds = segIpMode.Bounds;
             y += 48;
-            foreach (var row in new[] { new { Label = lblIpAddress, Field = txtIpAddress }, new { Label = lblMask, Field = txtMask }, new { Label = lblGateway, Field = txtGateway } })
+            foreach (var row in new[]
+            {
+                new { Label = lblIpAddress, Field = txtIpAddress, Field6 = txt6Address },
+                new { Label = lblMask, Field = txtMask, Field6 = txt6Prefix },
+                new { Label = lblGateway, Field = txtGateway, Field6 = txt6Gateway }
+            })
             {
                 PlaceRow(row.Label, y);
                 row.Field.Place(R(controlX, y, controlWidth, 40));
+                row.Field6.Place(R(controlX, y, controlWidth, 40));
                 y += 48;
             }
 
@@ -230,13 +266,21 @@ namespace IP_UpdateTest
             PlaceRow(lblDnsMode, y);
             int benchmarkWidth = btnDnsBenchmark.PreferredWidth, presetWidth = btnDnsPreset.PreferredWidth;
             btnDnsBenchmark.SetBounds(P(controlX + controlWidth) - benchmarkWidth, P(y + 2), benchmarkWidth, P(36));
-            btnDnsPreset.SetBounds(btnDnsBenchmark.Left - P(8) - presetWidth, P(y + 2), presetWidth, P(36));
+            // IPv6 页没有测速，预设按钮靠右
+            int presetRight = !IsIpv6Page ? btnDnsBenchmark.Left - P(8) : P(controlX + controlWidth);
+            btnDnsPreset.SetBounds(presetRight - presetWidth, P(y + 2), presetWidth, P(36));
             segDnsMode.SetBounds(P(controlX), P(y), btnDnsPreset.Left - P(8) - P(controlX), P(40));
+            seg6DnsMode.Bounds = segDnsMode.Bounds;
             y += 48;
-            foreach (var row in new[] { new { Label = lblDnsMain, Field = txtDnsMain }, new { Label = lblDnsBackup, Field = txtDnsBackup } })
+            foreach (var row in new[]
+            {
+                new { Label = lblDnsMain, Field = txtDnsMain, Field6 = txt6DnsMain },
+                new { Label = lblDnsBackup, Field = txtDnsBackup, Field6 = txt6DnsBackup }
+            })
             {
                 PlaceRow(row.Label, y);
                 row.Field.Place(R(controlX, y, controlWidth, 40));
+                row.Field6.Place(R(controlX, y, controlWidth, 40));
                 y += 48;
             }
         }

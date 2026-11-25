@@ -397,8 +397,6 @@ namespace IP_UpdateTest
                 txtDnsBackup.Text = has ? adapter.DnsBackup : "";
                 txtMac.Text = has ? adapter.MacAddressText : "";
                 txtDhcpServer.Text = has && adapter.IsDhcpEnabled && adapter.DhcpServer.Length > 0 ? adapter.DhcpServer : "-";
-                List<string> ipv6 = has ? adapter.IPv6Addresses : new List<string>();
-                txtIPv6.Text = ipv6.Count > 0 ? string.Join(Environment.NewLine, ipv6) : "-";
                 ShowIpv6(adapter);
 
                 bool dhcp = !has || adapter.IsDhcpEnabled;

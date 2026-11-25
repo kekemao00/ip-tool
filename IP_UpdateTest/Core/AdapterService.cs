@@ -5,6 +5,7 @@ using System.Linq;
 using System.Management;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security;
 using Microsoft.Win32;
@@ -365,8 +366,22 @@ namespace IP_UpdateTest.Core
                 DhcpServerAddresses = ips.DhcpServerAddresses,
                 DnsAddresses = ips.DnsAddresses,
                 IsDhcpEnabled = ipv4 != null && ipv4.IsDhcpEnabled,
-                Ipv6Enabled = nic.Supports(NetworkInterfaceComponent.IPv6)
+                Ipv6Enabled = nic.Supports(NetworkInterfaceComponent.IPv6),
+                Ipv6LiveAddresses = Ipv6Status.FromSystem(ips.UnicastAddresses),
+                Ipv6LiveGateways = ips.GatewayAddresses.Select(g => g.Address).Where(a => a.AddressFamily == AddressFamily.InterNetworkV6
+                    && !a.Equals(IPAddress.IPv6Any)).Select(ScopeFree).Distinct().ToList(),
+                // 没有任何 IPv6 DNS 时 Windows 报告 fec0:0:0:ffff::1 等已废弃的默认地址，不算
+                Ipv6LiveDns = ips.DnsAddresses.Where(a => a.AddressFamily == AddressFamily.InterNetworkV6 && !a.IsIPv6SiteLocal)
+                    .Select(ScopeFree).Distinct().ToList()
             };
+        }
+
+        /// <summary>
+        /// 去掉作用域后缀，如 fe80::1%12 → fe80::1
+        /// </summary>
+        private static string ScopeFree(IPAddress address)
+        {
+            return new IPAddress(address.GetAddressBytes()).ToString();
         }
 
         /// <summary>

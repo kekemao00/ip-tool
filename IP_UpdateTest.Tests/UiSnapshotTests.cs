@@ -317,12 +317,32 @@ namespace IP_UpdateTest.Tests
             form.Invalidate(true);
             form.Update();
             Pump(150, null);
+            AssertPlaceholdersFit(form, name);
             using (Bitmap bitmap = WindowCapture.Client(form))
             {
                 Assert.True(bitmap.Width > 100 && bitmap.Height > 100);
                 // 不是一片空白：至少要有墨色的像素（文字、图标）
                 Assert.True(HasInk(bitmap), name + " 没有画出内容");
                 if (!string.IsNullOrEmpty(outputDirectory)) bitmap.Save(Path.Combine(outputDirectory, name + ".png"), ImageFormat.Png);
+            }
+        }
+
+        /// <summary>
+        /// 输入框的占位提示是原生的，放不下时直接截断、没有省略号：要求完整显示（含未显示的那一页和打开着的面板）
+        /// </summary>
+        private static void AssertPlaceholdersFit(Control root, string name)
+        {
+            foreach (Control c in root.Controls)
+            {
+                var field = c as FieldBox;
+                if (field != null && field.Placeholder.Length > 0)
+                {
+                    // 原生输入框左右各有几像素的内边距
+                    int available = field.Box.ClientSize.Width - 6;
+                    int needed = TextRenderer.MeasureText(field.Placeholder, field.Box.Font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                    Assert.True(needed <= available, $"{name}：占位提示“{field.Placeholder}”放不下（需要 {needed}px，只有 {available}px）");
+                }
+                AssertPlaceholdersFit(c, name);
             }
         }
 

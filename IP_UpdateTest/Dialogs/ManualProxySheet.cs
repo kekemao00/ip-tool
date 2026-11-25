@@ -19,7 +19,7 @@ namespace IP_UpdateTest
         private const float FirstRow = 60;
         private const string Hint = "ssh -D 建立的是 SOCKS5 代理；npm、pip 不支持 SOCKS5，能选 HTTP 时选 HTTP。";
 
-        private readonly FieldBox txtHost = new FieldBox { Glyph = Glyph.Server, Mono = true, Placeholder = "如 127.0.0.1、192.168.1.2、proxy.corp.com" };
+        private readonly FieldBox txtHost = new FieldBox { Glyph = Glyph.Server, Mono = true, Placeholder = "如 127.0.0.1 或 proxy.corp.com" };
         private readonly FieldBox txtPort = new FieldBox { Glyph = Glyph.Hash, Mono = true, Placeholder = "如 1080" };
         private readonly Segmented segType = new Segmented();
         private readonly SpringButton btnSave = FooterButton("保存并选用", ButtonKind.Primary);

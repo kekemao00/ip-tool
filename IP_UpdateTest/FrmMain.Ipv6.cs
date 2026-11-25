@@ -69,7 +69,7 @@ namespace IP_UpdateTest
                 field.Box.Leave += (s, e) => ValidateIpv6Field(field);
             }
 
-            txt6Address.Placeholder = "如 2001:db8::10，也可输入 2001:db8::10/64";
+            txt6Address.Placeholder = "如 2001:db8::10，可带 /64";
             txt6Prefix.Placeholder = "通常为 64";
             txt6Gateway.Placeholder = "如 fe80::1，可留空";
             txt6DnsMain.Placeholder = "如 2400:3200::1";

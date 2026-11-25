@@ -196,7 +196,7 @@ namespace IP_UpdateTest
 
         private void ApplyHints()
         {
-            txtIpAddress.Placeholder = "如 192.168.1.10，也可输入 192.168.1.10/24";
+            txtIpAddress.Placeholder = "如 192.168.1.10，可带 /24";
             txtMask.Placeholder = "如 255.255.255.0";
             txtGateway.Placeholder = "可留空";
             txtDnsMain.Placeholder = "如 223.5.5.5";

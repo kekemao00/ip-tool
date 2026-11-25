@@ -5,8 +5,10 @@ using System.Linq;
 using System.Management;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security;
+using System.Threading;
 using Microsoft.Win32;
 
 namespace IP_UpdateTest.Core
@@ -320,7 +322,39 @@ namespace IP_UpdateTest.Core
             if (errors.Count > 0) return ApplyResult.Fail(errors[0].Message);
             string unsupported = CheckIpv6Supported(adapter);
             if (unsupported != null) return ApplyResult.Fail(unsupported);
-            return Ipv6Backend.Apply(adapter.InterfaceIndex, adapter.Ipv6ManualAddresses, adapter.Ipv6ManualGateways, adapter.HasStaticIpv6Dns, request);
+            ApplyResult result = Ipv6Backend.Apply(adapter.InterfaceIndex, adapter.Ipv6ManualAddresses, adapter.Ipv6ManualGateways, adapter.HasStaticIpv6Dns, request);
+
+            // 与 IPv4 的 ARP 冲突检查对应：IPv6 由系统做重复地址检测，地址冲突时系统不会使用它
+            IPAddress address;
+            if (!result.Success || request.UseAuto || adapter.Status != AdapterStatus.Connected || !Ipv6Validator.TryParse(request.Address, out address))
+                return result;
+            DuplicateAddressDetectionState? state = Ipv6Backend.WaitForDad(() => ReadDadState(adapter.NetworkInterfaceID, address), 12, () => Thread.Sleep(250));
+            if (state != DuplicateAddressDetectionState.Duplicate) return result;
+
+            // 这次新加的地址撤销掉，免得留下一个用不了的手动地址；原来就有的不动
+            bool added = !adapter.Ipv6ManualAddresses.Any(m => Ipv6Validator.Normalize(m.Address) == address.ToString());
+            if (added) NetshBackend.Run(new[] { Ipv6Backend.DeleteAddressCommand(adapter.InterfaceIndex, address) });
+            return ApplyResult.Fail($"IPv6 地址 {address} 已被网段内的其他设备使用（重复地址检测失败），系统不会使用它"
+                + (added ? "，已撤销这个地址。" : "。") + "请换一个地址再应用");
+        }
+
+        /// <summary>
+        /// 读取网卡上某个 IPv6 地址的重复地址检测状态，找不到时返回 null
+        /// </summary>
+        private static DuplicateAddressDetectionState? ReadDadState(string interfaceId, IPAddress address)
+        {
+            try
+            {
+                NetworkInterface nic = NetworkInterface.GetAllNetworkInterfaces()
+                    .FirstOrDefault(n => string.Equals(n.Id, interfaceId, StringComparison.OrdinalIgnoreCase));
+                UnicastIPAddressInformation info = nic?.GetIPProperties().UnicastAddresses
+                    .FirstOrDefault(u => u.Address.AddressFamily == AddressFamily.InterNetworkV6 && new IPAddress(u.Address.GetAddressBytes()).Equals(address));
+                return info?.DuplicateAddressDetectionState;
+            }
+            catch (NetworkInformationException)
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -365,8 +399,22 @@ namespace IP_UpdateTest.Core
                 DhcpServerAddresses = ips.DhcpServerAddresses,
                 DnsAddresses = ips.DnsAddresses,
                 IsDhcpEnabled = ipv4 != null && ipv4.IsDhcpEnabled,
-                Ipv6Enabled = nic.Supports(NetworkInterfaceComponent.IPv6)
+                Ipv6Enabled = nic.Supports(NetworkInterfaceComponent.IPv6),
+                Ipv6LiveAddresses = Ipv6Status.FromSystem(ips.UnicastAddresses),
+                Ipv6LiveGateways = ips.GatewayAddresses.Select(g => g.Address).Where(a => a.AddressFamily == AddressFamily.InterNetworkV6
+                    && !a.Equals(IPAddress.IPv6Any)).Select(ScopeFree).Distinct().ToList(),
+                // 没有任何 IPv6 DNS 时 Windows 报告 fec0:0:0:ffff::1 等已废弃的默认地址，不算
+                Ipv6LiveDns = ips.DnsAddresses.Where(a => a.AddressFamily == AddressFamily.InterNetworkV6 && !a.IsIPv6SiteLocal)
+                    .Select(ScopeFree).Distinct().ToList()
             };
+        }
+
+        /// <summary>
+        /// 去掉作用域后缀，如 fe80::1%12 → fe80::1
+        /// </summary>
+        private static string ScopeFree(IPAddress address)
+        {
+            return new IPAddress(address.GetAddressBytes()).ToString();
         }
 
         /// <summary>

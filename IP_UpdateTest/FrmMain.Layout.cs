@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using IP_UpdateTest.Ui;
 
@@ -68,6 +69,13 @@ namespace IP_UpdateTest
         private readonly FieldBox txt6DnsMain = new FieldBox { Glyph = Glyph.Server, Mono = true };
         private readonly FieldBox txt6DnsBackup = new FieldBox { Glyph = Glyph.Server, Mono = true };
 
+        // IPv6 页“自动获取”时，地址、前缀、网关三行换成状态列表：类别 + 地址（可选中复制），下面是说明
+        private const int Ipv6StatusRows = 4;
+        private const float Ipv6StatusRowHeight = 34;
+        private readonly InkLabel[] lbl6Status = Enumerable.Range(0, Ipv6StatusRows).Select(_ => RowLabel("")).ToArray();
+        private readonly TextBox[] txt6Status = Enumerable.Range(0, Ipv6StatusRows).Select(_ => InfoBox(false)).ToArray();
+        private readonly InkLabel lbl6Notice = new InkLabel { Style = TextStyle.Small, TextColor = Palette.Ink2, Wrap = true };
+
         // 操作栏
         private readonly SpringButton btnProfile = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Layers, Text = "配置方案", ShowChevron = true };
         private readonly SpringButton btnDiagnose = new SpringButton { Kind = ButtonKind.Secondary, Glyph = Glyph.Activity, Text = "诊断" };
@@ -120,8 +128,10 @@ namespace IP_UpdateTest
             {
                 lblFamily, segFamily, lblIpMode, segIpMode, lblIpAddress, txtIpAddress, lblMask, txtMask, lblGateway, txtGateway, ruleConfig,
                 lblDnsMode, segDnsMode, btnDnsPreset, btnDnsBenchmark, lblDnsMain, txtDnsMain, lblDnsBackup, txtDnsBackup,
-                seg6Mode, txt6Address, txt6Prefix, txt6Gateway, seg6DnsMode, txt6DnsMain, txt6DnsBackup
+                seg6Mode, txt6Address, txt6Prefix, txt6Gateway, seg6DnsMode, txt6DnsMain, txt6DnsBackup, lbl6Notice
             });
+            pnlConfig.Controls.AddRange(lbl6Status);
+            pnlConfig.Controls.AddRange(txt6Status);
             Controls.AddRange(new Control[] { pnlElevation, pnlAdapter, pnlConfig, btnProfile, btnDiagnose, btnReport, btnTerminalProxy, btnRevert, btnApply, lblStatus });
 
             // Tab 顺序：网卡 → 配置 → 操作
@@ -247,6 +257,7 @@ namespace IP_UpdateTest
             segIpMode.Bounds = R(controlX, y, controlWidth, 40);
             seg6Mode.Bounds = segIpMode.Bounds;
             y += 48;
+            LayoutIpv6Status(y, controlX, controlWidth);
             foreach (var row in new[]
             {
                 new { Label = lblIpAddress, Field = txtIpAddress, Field6 = txt6Address },
@@ -285,6 +296,23 @@ namespace IP_UpdateTest
             }
         }
 
+        /// <summary>
+        /// IPv6 状态列表占地址、前缀、网关三行（3 × 48）的位置：每行 34，说明接在列表下面
+        /// </summary>
+        private void LayoutIpv6Status(float top, float controlX, float controlWidth)
+        {
+            for (int i = 0; i < Ipv6StatusRows; i++)
+            {
+                float rowY = top + i * Ipv6StatusRowHeight;
+                lbl6Status[i].Bounds = R(20, rowY, LabelColumn - 8, Ipv6StatusRowHeight);
+                int h = txt6Status[i].Height;
+                txt6Status[i].SetBounds(P(controlX + 2), P(rowY) + (P(Ipv6StatusRowHeight) - h) / 2, P(controlWidth - 2), h);
+            }
+            int rows = ipv6Status.Rows.Count;
+            float noticeY = top + rows * Ipv6StatusRowHeight + (rows > 0 ? 6 : 10);
+            lbl6Notice.Bounds = R(controlX, noticeY, controlWidth, top + 3 * 48 - 8 - noticeY);
+        }
+
         private void PlaceRow(InkLabel label, float y)
         {
             label.Bounds = R(20, y, LabelColumn - 8, 40);
@@ -297,6 +325,9 @@ namespace IP_UpdateTest
         {
             foreach (TextBox box in new[] { txtMac, txtDhcpServer, txtIPv6 })
                 box.Font = Typo.NativeFont(TextStyle.Mono, S, true);
+            // 小一号，完整的 8 段地址（39 个字符）也放得下
+            foreach (TextBox box in txt6Status)
+                box.Font = Typo.NativeFont(TextStyle.Small, S, true);
         }
 
         protected override void OnScaleChanged()

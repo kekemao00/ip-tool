@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/kekemao00/ip-tool)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 
-Windows 网络配置与诊断工具：一键切换网卡的 IPv4 / IPv6 和 DNS，分层诊断定位断网环节，一键让 git、curl、npm 等命令行工具走代理。解压即用，无需安装。
+**Windows 网络配置与诊断工具。** 在公司和家里之间切换 IP、断网时找出断在哪一环、让 git 和 npm 跟着代理软件走——这些日常网络问题，一个免安装的小工具就能解决。
 
 ![主界面](screenshots/main.png)
 

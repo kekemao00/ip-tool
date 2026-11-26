@@ -116,6 +116,10 @@ namespace IP_UpdateTest.Tests
                 form.OpenCommandPalette();
                 Save(form, "main-admin-palette");
                 CloseSheets(form);
+
+                form.ShowIpv6Page();
+                form.BindAdapterList(new List<NetworkAdapter> { Ipv6Adapter(true) });
+                Save(form, "main-admin-ipv6");
             }
         }
 
